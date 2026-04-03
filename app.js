@@ -1,5 +1,5 @@
 /* ============================================================
-   Schelio — Main Application v3.0
+   Schelio — Main Application v2.0.0
    Features: ERD, Field Search, Mermaid, Save/Load, PDF Spec,
              Record Types, Picklist Values by RT, Layouts,
              Lightning Record Pages
@@ -8,6 +8,8 @@
   'use strict';
 
   const CARD_WIDTH = 240, CARD_HEADER_H = 48, FIELD_ROW_H = 22, MAX_FIELDS_SHOWN = 12, CARD_PADDING = 8;
+  const SF_API_VERSION = 'v59.0';
+  const API_TIMEOUT_MS = 30000;
   const COLORS = { standard: { header: '#1E3A5F', accent: '#818CF8' }, custom: { header: '#1A3D2E', accent: '#34D399' } };
   const FIELD_ICONS = { id:'🔑',string:'📝',textarea:'📄',boolean:'☑️',int:'🔢',double:'🔢',currency:'💰',percent:'📊',date:'📅',datetime:'📅',email:'📧',phone:'📞',url:'🔗',picklist:'📋',multipicklist:'📋',reference:'🔗',lookup:'🔗',masterrecord:'🔗',address:'📍',default:'◽' };
 
@@ -15,6 +17,7 @@
   let zoom=1, panX=0, panY=0, isPanning=false, panStart={x:0,y:0}, dragNode=null, dragOffset={x:0,y:0}, showRelations=true, activeFilter='all';
 
   // Extended metadata caches
+  let activeDetailObject = null;  // guard against async race conditions in detail panel
   let picklistCache = {};        // objectApi -> { rtId -> { fieldApi -> [values] } }
   let layoutCache = {};          // objectApi -> [layouts]
   let flexiPageCache = {};       // objectApi -> [flexiPages]
@@ -22,6 +25,8 @@
   let layoutAssignCache = {};    // objectApi -> [{ profile, recordType, layout }]
 
   const $ = s => document.querySelector(s);
+  function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+  function escSoql(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
   const loadingOverlay=$('#loadingOverlay'), loadingStatus=$('#loadingStatus'), loadingBar=$('#loadingBar');
   const objectList=$('#objectList'), objectCount=$('#objectCount'), searchInput=$('#searchInput');
   const fieldSearchInput=$('#fieldSearchInput'), fieldResults=$('#fieldResults'), fieldSearchHint=$('#fieldSearchHint');
@@ -54,26 +59,35 @@
 
   // ═══ SALESFORCE API ═══
   async function sfApi(path) {
-    const res = await fetch(instanceUrl+path, { headers:{'Authorization':'Bearer '+sessionId,'Content-Type':'application/json'} });
-    if(!res.ok) throw new Error('API '+res.status+' '+res.statusText);
-    return res.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      const res = await fetch(instanceUrl+path, { headers:{'Authorization':'Bearer '+sessionId,'Content-Type':'application/json'}, signal: controller.signal });
+      if(!res.ok) throw new Error('API '+res.status+' '+res.statusText);
+      return res.json();
+    } catch(e) {
+      if (e.name === 'AbortError') throw new Error('Request timed out after '+API_TIMEOUT_MS/1000+'s');
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async function sfToolingQuery(soql) {
-    return sfApi('/services/data/v59.0/tooling/query/?q='+encodeURIComponent(soql));
+    return sfApi('/services/data/'+SF_API_VERSION+'/tooling/query/?q='+encodeURIComponent(soql));
   }
 
-  async function testConnection() { await sfApi('/services/data/v59.0/'); }
+  async function testConnection() { await sfApi('/services/data/'+SF_API_VERSION+'/'); }
 
   async function fetchObjectList() {
-    const data = await sfApi('/services/data/v59.0/sobjects/');
+    const data = await sfApi('/services/data/'+SF_API_VERSION+'/sobjects/');
     allObjects = data.sobjects.filter(o=>o.queryable&&!o.name.endsWith('__History')&&!o.name.endsWith('__Feed')&&!o.name.endsWith('__Share')&&!o.name.endsWith('__Tag')&&!o.name.endsWith('ChangeEvent')).sort((a,b)=>a.label.localeCompare(b.label));
     renderObjectList(); objectCount.textContent=allObjects.length+' objects';
   }
 
   async function fetchObjectDescribe(n) {
     if(objectMeta[n]) return objectMeta[n];
-    const d=await sfApi('/services/data/v59.0/sobjects/'+n+'/describe/');
+    const d=await sfApi('/services/data/'+SF_API_VERSION+'/sobjects/'+n+'/describe/');
     objectMeta[n]=d; return d;
   }
 
@@ -89,7 +103,7 @@
     for (const rt of rtInfos) {
       if (!rt.active) continue;
       try {
-        const data = await sfApi('/services/data/v59.0/ui-api/object-info/'+objectApi+'/picklist-values/'+rt.recordTypeId);
+        const data = await sfApi('/services/data/'+SF_API_VERSION+'/ui-api/object-info/'+objectApi+'/picklist-values/'+rt.recordTypeId);
         const fields = {};
         if (data.picklistFieldValues) {
           Object.entries(data.picklistFieldValues).forEach(([fieldApi, info]) => {
@@ -115,13 +129,13 @@
     if (layoutCache[objectApi]) return layoutCache[objectApi];
     try {
       const data = await sfToolingQuery(
-        "SELECT Id, Name, EntityDefinition.QualifiedApiName, TableEnumOrId FROM Layout WHERE TableEnumOrId = '"+objectApi+"'"
+        "SELECT Id, Name, EntityDefinition.QualifiedApiName, TableEnumOrId FROM Layout WHERE TableEnumOrId = '"+escSoql(objectApi)+"'"
       );
       layoutCache[objectApi] = data.records || [];
     } catch(e) {
       // Fallback: try describe layouts
       try {
-        const data = await sfApi('/services/data/v59.0/sobjects/'+objectApi+'/describe/layouts/');
+        const data = await sfApi('/services/data/'+SF_API_VERSION+'/sobjects/'+objectApi+'/describe/layouts/');
         layoutCache[objectApi] = (data.layouts || []).map(l => ({ Id: l.id, Name: l.name }));
       } catch(e2) {
         layoutCache[objectApi] = [];
@@ -136,7 +150,7 @@
     try {
       const data = await sfToolingQuery(
         "SELECT Id, DeveloperName, MasterLabel, Type, EntityDefinitionId, Description "+
-        "FROM FlexiPage WHERE EntityDefinitionId = '"+objectApi+"' OR SobjectType = '"+objectApi+"'"
+        "FROM FlexiPage WHERE EntityDefinitionId = '"+escSoql(objectApi)+"' OR SobjectType = '"+escSoql(objectApi)+"'"
       );
       flexiPageCache[objectApi] = data.records || [];
     } catch(e) {
@@ -154,11 +168,11 @@
     try {
       // Object-level CRUD permissions per profile
       const objData = await sfApi(
-        "/services/data/v59.0/query/?q="+encodeURIComponent(
+        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
           "SELECT Id, ParentId, Parent.Profile.Name, Parent.Label, SobjectType, "+
           "PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, "+
           "PermissionsViewAllRecords, PermissionsModifyAllRecords "+
-          "FROM ObjectPermissions WHERE SobjectType = '"+objectApi+"' "+
+          "FROM ObjectPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
           "AND Parent.IsOwnedByProfile = true ORDER BY Parent.Profile.Name"
         )
       );
@@ -170,10 +184,10 @@
     try {
       // Field-level security per profile
       const flsData = await sfApi(
-        "/services/data/v59.0/query/?q="+encodeURIComponent(
+        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
           "SELECT Id, ParentId, Parent.Profile.Name, Parent.Label, SobjectType, Field, "+
           "PermissionsRead, PermissionsEdit "+
-          "FROM FieldPermissions WHERE SobjectType = '"+objectApi+"' "+
+          "FROM FieldPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
           "AND Parent.IsOwnedByProfile = true ORDER BY Parent.Profile.Name, Field"
         )
       );
@@ -219,7 +233,7 @@
     try {
       const data = await sfToolingQuery(
         "SELECT Id, Layout.Name, ProfileId, Profile.Name, RecordTypeId, RecordType.Name "+
-        "FROM ProfileLayout WHERE TableEnumOrId = '"+objectApi+"' ORDER BY Profile.Name"
+        "FROM ProfileLayout WHERE TableEnumOrId = '"+escSoql(objectApi)+"' ORDER BY Profile.Name"
       );
       const records = data.records || [];
       // Merge into profileCache
@@ -261,7 +275,7 @@
 
   async function toggleObject(api) {
     if(selectedObjects.has(api)){selectedObjects.delete(api);delete nodePositions[api];}
-    else{selectedObjects.add(api);try{await fetchObjectDescribe(api);}catch(e){}assignPosition(api);}
+    else{selectedObjects.add(api);try{await fetchObjectDescribe(api);}catch(e){console.warn('Failed to describe '+api,e);}assignPosition(api);}
     renderObjectList();buildRelationships();renderERD();updateEmptyState();
   }
   function assignPosition(api){const c=Object.keys(nodePositions).length;const cols=Math.ceil(Math.sqrt(c+1));nodePositions[api]={x:60+(c%cols)*(CARD_WIDTH+80),y:60+Math.floor(c/cols)*350};}
@@ -269,6 +283,7 @@
 
   // ═══ FIELD SEARCH ═══
   function searchFields(query) {
+    query=query.trim();
     if(!query||query.length<2){fieldResults.innerHTML='';fieldSearchHint.style.display='block';return;}
     fieldSearchHint.style.display='none';
     const q=query.toLowerCase(), results=[];
@@ -302,7 +317,7 @@
     try{
       const L=JSON.parse(saved); showToast('Loading…','⏳');
       selectedObjects=new Set(L.selectedObjects); nodePositions=L.nodePositions||{}; zoom=L.zoom||1; panX=L.panX||0; panY=L.panY||0;
-      for(const o of L.selectedObjects){try{await fetchObjectDescribe(o);}catch(e){}}
+      for(const o of L.selectedObjects){try{await fetchObjectDescribe(o);}catch(e){console.warn('Failed to describe '+o,e);}}
       renderObjectList();buildRelationships();renderERD();updateEmptyState();applyTransform();
       showToast('Restored '+L.selectedObjects.length+' objects','✓');
     }catch(e){showToast('Load failed','⚠️');}
@@ -337,6 +352,7 @@
   async function showDetail(apiName) {
     const meta = objectMeta[apiName];
     if (!meta) return;
+    activeDetailObject = apiName;
     detailTitle.textContent = meta.label;
     detailPanel.classList.add('visible');
 
@@ -362,23 +378,25 @@
     $('#dtabProfiles').innerHTML = '<div class="detail-loading"><div class="detail-spinner"></div><span>Loading profile permissions…</span></div>';
 
     // Fetch async data in background
-    fetchPicklistsByRT(apiName).then(data => renderPicklistsTab(meta, data)).catch(e => {
-      $('#dtabPicklists').innerHTML = '<div class="empty-tab-msg">Could not load picklist values.<br>'+e.message+'</div>';
+    // Guard: skip rendering if user switched to another object while loading
+    fetchPicklistsByRT(apiName).then(data => {
+      if (activeDetailObject === apiName) renderPicklistsTab(meta, data);
+    }).catch(e => {
+      if (activeDetailObject === apiName) $('#dtabPicklists').innerHTML = '<div class="empty-tab-msg">Could not load picklist values.<br>'+escHtml(e.message)+'</div>';
     });
 
     Promise.all([fetchLayouts(apiName), fetchFlexiPages(apiName)]).then(([layouts, pages]) => {
-      renderLayoutsTab(meta, layouts, pages);
+      if (activeDetailObject === apiName) renderLayoutsTab(meta, layouts, pages);
     }).catch(e => {
-      $('#dtabLayouts').innerHTML = '<div class="empty-tab-msg">Could not load layouts.<br>'+e.message+'</div>';
+      if (activeDetailObject === apiName) $('#dtabLayouts').innerHTML = '<div class="empty-tab-msg">Could not load layouts.<br>'+escHtml(e.message)+'</div>';
     });
 
-    // Profiles: fetch permissions then layout assignments, then render
     fetchProfilePermissions(apiName).then(profData => {
       return fetchLayoutAssignments(apiName).then(() => profData);
     }).then(profData => {
-      renderProfilesTab(meta, profData);
+      if (activeDetailObject === apiName) renderProfilesTab(meta, profData);
     }).catch(e => {
-      $('#dtabProfiles').innerHTML = '<div class="empty-tab-msg">Could not load profile permissions.<br>'+e.message+'</div>';
+      if (activeDetailObject === apiName) $('#dtabProfiles').innerHTML = '<div class="empty-tab-msg">Could not load profile permissions.<br>'+escHtml(e.message)+'</div>';
     });
   }
 
@@ -489,9 +507,12 @@
     const roots = Object.keys(deps.controlling).filter(c => !deps.dependent[c]);
     roots.forEach(root => {
       const chain = [root];
+      const visited = new Set([root]);
       let current = root;
       while (deps.controlling[current] && deps.controlling[current].length) {
         current = deps.controlling[current][0];
+        if (visited.has(current)) break; // prevent circular dependency loop
+        visited.add(current);
         chain.push(current);
       }
       if (chain.length > 1) chains.push(chain);
@@ -840,7 +861,7 @@
     if(!selected.length){showToast('Select objects first','⚠️');return;}
     const now=new Date();
     const dateStr=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-    const orgName=instanceUrl.replace('https://','').replace('.my.salesforce.com','').replace('.lightning.force.com','');
+    const orgName=escHtml(instanceUrl.replace('https://','').replace('.my.salesforce.com','').replace('.lightning.force.com',''));
     const totalFields=selected.reduce((s,a)=>s+(objectMeta[a]?.fields?.length||0),0);
 
     let objectSections='';
@@ -1004,7 +1025,7 @@ ${objectSections}${erdSummary}
   function fitAll(){if(!selectedObjects.size)return;let mx=Infinity,my=Infinity,Mx=-Infinity,My=-Infinity;selectedObjects.forEach(a=>{const p=nodePositions[a];if(!p)return;mx=Math.min(mx,p.x);my=Math.min(my,p.y);Mx=Math.max(Mx,p.x+CARD_WIDTH);My=Math.max(My,p.y+300);});const r=erdCanvas.getBoundingClientRect();const cw=Mx-mx+100,ch=My-my+100;zoom=Math.max(0.2,Math.min(r.width/cw,r.height/ch,1.5));panX=(r.width-cw*zoom)/2-mx*zoom+50;panY=(r.height-ch*zoom)/2-my*zoom+50;applyTransform();}
 
   function exportPng(){const b=new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'});const u=URL.createObjectURL(b);const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=erdCanvas.clientWidth*2;c.height=erdCanvas.clientHeight*2;const ctx=c.getContext('2d');ctx.fillStyle='#060D1B';ctx.fillRect(0,0,c.width,c.height);ctx.scale(2,2);ctx.drawImage(img,0,0);URL.revokeObjectURL(u);c.toBlob(bl=>{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download='schelio-erd.png';a.click();});};img.src=u;}
-  function exportSvg(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'}));a.download='schelio-erd.svg';a.click();}
+  function exportSvg(){const a=document.createElement('a');const url=URL.createObjectURL(new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'}));a.href=url;a.download='schelio-erd.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
   // ═══ EVENTS ═══
   function setupEventListeners(){
@@ -1037,7 +1058,7 @@ ${objectSections}${erdSummary}
       if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');}
       if(e.ctrlKey&&e.key==='='){e.preventDefault();setZoom(zoom*1.2);}if(e.ctrlKey&&e.key==='-'){e.preventDefault();setZoom(zoom/1.2);}
       if(e.ctrlKey&&e.key==='0'){e.preventDefault();fitAll();}if(e.ctrlKey&&e.key==='s'){e.preventDefault();saveLayout();}
-      if(e.ctrlKey&&e.key==='f'){e.preventDefault();document.querySelectorAll('.sidebar-tab')[1].click();fieldSearchInput.focus();}
+      if(e.ctrlKey&&e.key==='f'){e.preventDefault();const tabs=document.querySelectorAll('.sidebar-tab');if(tabs[1])tabs[1].click();fieldSearchInput.focus();}
     });
   }
 

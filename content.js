@@ -31,13 +31,6 @@
       result.sessionId = sidCookie.split('=')[1];
     }
 
-    // Try aura framework context
-    try {
-      if (typeof $A !== 'undefined' && $A.get) {
-        const token = $A.get('$SObjectType.CurrentUser.Id');
-      }
-    } catch(e) {}
-
     // Try to get org ID from page
     try {
       const metaOrgId = document.querySelector('meta[name="org-id"]');
