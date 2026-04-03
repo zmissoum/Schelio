@@ -836,6 +836,129 @@ html, body {
   color: var(--accent-amber);
 }
 
+/* Picklist Dependencies */
+.pl-dep-tree {
+  margin-bottom: 14px;
+  padding: 12px;
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  border-radius: 8px;
+}
+
+.pl-dep-tree .detail-section-title { margin-bottom: 8px; }
+
+.pl-dep-chain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.pl-dep-node {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.pl-dep-node-checkbox {
+  color: var(--accent-purple);
+  background: rgba(129, 140, 248, 0.1);
+  border-color: rgba(129, 140, 248, 0.25);
+}
+
+.pl-dep-arrow {
+  color: var(--text-faint);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pl-dep-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pl-dep-badge-ctrl {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-blue);
+}
+
+.pl-dep-badge-dep {
+  background: rgba(129, 140, 248, 0.15);
+  color: var(--accent-purple);
+}
+
+.pl-dep-matrix { margin-top: 4px; }
+
+.pl-dep-matrix-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.pl-dep-ctrl-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.pl-dep-ctrl-val {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pl-dep-ctrl-val:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.pl-dep-ctrl-val.active-filter {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.pl-dep-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pl-dep-val.filtered-out {
+  display: none;
+}
+
+.pl-ctrl-clickable {
+  cursor: pointer;
+  border-style: dashed;
+}
+
+.pl-ctrl-clickable:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
 /* Layout Cards */
 .layout-card {
   background: var(--bg-surface);

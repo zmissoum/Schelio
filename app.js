@@ -435,6 +435,70 @@
     $('#dtabRecordtypes').innerHTML = h;
   }
 
+  // ═══ PICKLIST DEPENDENCIES ═══
+  function buildPicklistDependencies(meta) {
+    const deps = { controlling: {}, dependent: {} };
+    meta.fields.forEach(f => {
+      if (f.controllerName && (f.type === 'picklist' || f.type === 'multipicklist')) {
+        if (!deps.controlling[f.controllerName]) deps.controlling[f.controllerName] = [];
+        deps.controlling[f.controllerName].push(f.name);
+        deps.dependent[f.name] = f.controllerName;
+      }
+    });
+    return deps;
+  }
+
+  function decodeValidFor(encoded) {
+    const decoded = atob(encoded);
+    const indices = new Set();
+    for (let byteIdx = 0; byteIdx < decoded.length; byteIdx++) {
+      const byte = decoded.charCodeAt(byteIdx);
+      for (let bit = 0; bit < 8; bit++) {
+        if ((byte >> (7 - bit)) & 1) indices.add(byteIdx * 8 + bit);
+      }
+    }
+    return indices;
+  }
+
+  function buildDependencyMatrix(meta, controllerName, dependentName) {
+    const controllerField = meta.fields.find(f => f.name === controllerName);
+    const dependentField = meta.fields.find(f => f.name === dependentName);
+    if (!controllerField || !dependentField) return {};
+
+    const controllerValues = (controllerField.picklistValues || []).filter(v => v.active);
+    const dependentValues = (dependentField.picklistValues || []).filter(v => v.active);
+    const matrix = {};
+
+    controllerValues.forEach((cv, idx) => { matrix[cv.value] = []; });
+    dependentValues.forEach(dv => {
+      if (dv.validFor) {
+        const validIndices = decodeValidFor(dv.validFor);
+        validIndices.forEach(idx => {
+          if (idx < controllerValues.length) {
+            const cv = controllerValues[idx].value;
+            if (matrix[cv]) matrix[cv].push({ label: dv.label, value: dv.value });
+          }
+        });
+      }
+    });
+    return matrix;
+  }
+
+  function buildDepChains(deps) {
+    const chains = [];
+    const roots = Object.keys(deps.controlling).filter(c => !deps.dependent[c]);
+    roots.forEach(root => {
+      const chain = [root];
+      let current = root;
+      while (deps.controlling[current] && deps.controlling[current].length) {
+        current = deps.controlling[current][0];
+        chain.push(current);
+      }
+      if (chain.length > 1) chains.push(chain);
+    });
+    return chains;
+  }
+
   function renderPicklistsTab(meta, picklistData) {
     const picklistFields = meta.fields.filter(f => f.type === 'picklist' || f.type === 'multipicklist').sort((a,b) => a.label.localeCompare(b.label));
 
@@ -443,8 +507,36 @@
       return;
     }
 
+    const deps = buildPicklistDependencies(meta);
+    const chains = buildDepChains(deps);
     const rtEntries = Object.entries(picklistData);
-    let h = '<div class="detail-section"><div class="detail-section-title">Picklist Fields ('+picklistFields.length+')</div>';
+
+    let h = '';
+
+    // ── Dependency tree (if any) ──
+    if (chains.length) {
+      h += '<div class="pl-dep-tree"><div class="detail-section-title">Picklist Dependencies</div>';
+      chains.forEach(chain => {
+        h += '<div class="pl-dep-chain">';
+        chain.forEach((fieldApi, i) => {
+          const f = meta.fields.find(ff => ff.name === fieldApi);
+          const label = f ? f.label : fieldApi;
+          const isPicklist = f && (f.type === 'picklist' || f.type === 'multipicklist');
+          h += '<span class="pl-dep-node'+(isPicklist ? '' : ' pl-dep-node-checkbox')+'" title="'+fieldApi+'">'+label+'</span>';
+          if (i < chain.length - 1) h += '<span class="pl-dep-arrow">→</span>';
+        });
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+
+    h += '<div class="detail-section"><div class="detail-section-title">Picklist Fields ('+picklistFields.length+')</div>';
+
+    // Pre-build dependency matrices for interactive filtering
+    const matrices = {};
+    Object.entries(deps.dependent).forEach(([depField, ctrlField]) => {
+      matrices[depField] = buildDependencyMatrix(meta, ctrlField, depField);
+    });
 
     picklistFields.forEach(field => {
       const totalValues = new Set();
@@ -452,27 +544,68 @@
         if (rt.fields[field.name]) rt.fields[field.name].forEach(v => totalValues.add(v.value));
       });
 
-      h += '<div class="pl-accordion" data-pl="'+field.name+'">';
+      const isControlling = !!deps.controlling[field.name];
+      const isDep = !!deps.dependent[field.name];
+
+      h += '<div class="pl-accordion'+(isControlling?' pl-controlling':'')+(isDep?' pl-dependent':'')+'" data-pl="'+field.name+'">';
       h += '<div class="pl-accordion-header">';
       h += '<span class="pl-accordion-arrow">▶</span>';
       h += '<span class="pl-accordion-title">'+(FIELD_ICONS[field.type]||'📋')+' '+field.label+'</span>';
+
+      // Dependency badges
+      if (isControlling) {
+        const depLabels = deps.controlling[field.name].map(d => { const f = meta.fields.find(ff=>ff.name===d); return f?f.label:d; });
+        h += '<span class="pl-dep-badge pl-dep-badge-ctrl" title="Controls: '+depLabels.join(', ')+'">Controls '+depLabels.join(', ')+'</span>';
+      }
+      if (isDep) {
+        const ctrlField = meta.fields.find(f => f.name === deps.dependent[field.name]);
+        const ctrlLabel = ctrlField ? ctrlField.label : deps.dependent[field.name];
+        h += '<span class="pl-dep-badge pl-dep-badge-dep" title="Depends on: '+ctrlLabel+'">Depends on '+ctrlLabel+'</span>';
+      }
+
       h += '<span class="pl-accordion-count">'+totalValues.size+' values</span>';
       h += '</div>';
       h += '<div class="pl-accordion-body">';
 
-      if (rtEntries.length <= 1) {
-        // Single RT or master only — just show values flat
+      // If this is a dependent field, show interactive dependency matrix
+      if (isDep && matrices[field.name]) {
+        const matrix = matrices[field.name];
+        const ctrlField = meta.fields.find(f => f.name === deps.dependent[field.name]);
+        const ctrlLabel = ctrlField ? ctrlField.label : deps.dependent[field.name];
+        const ctrlValues = Object.keys(matrix);
+
+        h += '<div class="pl-dep-matrix" data-dep-field="'+field.name+'">';
+        h += '<div class="pl-dep-matrix-label">Select a '+ctrlLabel+' value to filter:</div>';
+        h += '<div class="pl-dep-ctrl-values">';
+        h += '<span class="pl-dep-ctrl-val active-filter" data-ctrl-val="__all__">All</span>';
+        ctrlValues.forEach(cv => {
+          const count = matrix[cv].length;
+          h += '<span class="pl-dep-ctrl-val" data-ctrl-val="'+cv+'" title="'+count+' dependent values">'+cv+'</span>';
+        });
+        h += '</div>';
+        h += '<div class="pl-dep-values" data-dep-target="'+field.name+'">';
+        // Show all values initially
+        const allDepValues = new Map();
+        Object.entries(matrix).forEach(([cv, dvs]) => {
+          dvs.forEach(dv => { if (!allDepValues.has(dv.value)) allDepValues.set(dv.value, { label: dv.label, controllers: [] }); allDepValues.get(dv.value).controllers.push(cv); });
+        });
+        allDepValues.forEach((info, val) => {
+          h += '<span class="pl-value pl-dep-val" data-dep-val="'+val+'" data-controllers="'+info.controllers.join('||')+'" title="'+val+' (available for: '+info.controllers.join(', ')+')">'+info.label+'</span>';
+        });
+        if (!allDepValues.size) h += '<span style="color:var(--text-faint);font-size:11px">No dependency data available</span>';
+        h += '</div></div>';
+      } else if (rtEntries.length <= 1) {
         const values = rtEntries[0] ? (rtEntries[0][1].fields[field.name] || []) : [];
         h += '<div class="pl-value-list">';
         values.forEach(v => {
           let cls = 'pl-value';
           if (v.isDefault) cls += ' default-val';
+          if (isControlling) cls += ' pl-ctrl-clickable';
           h += '<span class="'+cls+'" title="'+v.value+'">'+v.label+'</span>';
         });
         if (!values.length) h += '<span style="color:var(--text-faint);font-size:11px">No values</span>';
         h += '</div>';
       } else {
-        // Multiple RTs — show per RT
         rtEntries.forEach(([rtId, rt]) => {
           const values = rt.fields[field.name] || [];
           h += '<div class="pl-rt-group">';
@@ -481,6 +614,7 @@
           values.forEach(v => {
             let cls = 'pl-value';
             if (v.isDefault) cls += ' default-val';
+            if (isControlling) cls += ' pl-ctrl-clickable';
             h += '<span class="'+cls+'" title="'+v.value+'">'+v.label+'</span>';
           });
           if (!values.length) h += '<span style="color:var(--text-faint);font-size:11px">No values for this RT</span>';
@@ -497,6 +631,30 @@
     // Accordion click handlers
     document.querySelectorAll('.pl-accordion-header').forEach(hdr => {
       hdr.addEventListener('click', () => hdr.parentElement.classList.toggle('open'));
+    });
+
+    // Dependency filter click handlers
+    document.querySelectorAll('.pl-dep-ctrl-val').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const matrix = btn.closest('.pl-dep-matrix');
+        const depField = matrix.dataset.depField;
+        const ctrlVal = btn.dataset.ctrlVal;
+
+        // Toggle active state
+        matrix.querySelectorAll('.pl-dep-ctrl-val').forEach(b => b.classList.remove('active-filter'));
+        btn.classList.add('active-filter');
+
+        // Filter dependent values
+        const valContainer = matrix.querySelector('.pl-dep-values');
+        valContainer.querySelectorAll('.pl-dep-val').forEach(v => {
+          if (ctrlVal === '__all__') {
+            v.classList.remove('filtered-out');
+          } else {
+            const controllers = v.dataset.controllers.split('||');
+            v.classList.toggle('filtered-out', !controllers.includes(ctrlVal));
+          }
+        });
+      });
     });
   }
 
