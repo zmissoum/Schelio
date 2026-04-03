@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schelio — Interactive ERD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Sans:opsz@9..40;wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-content">
+      <div class="loading-logo">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect x="14" y="2" width="20" height="12" rx="3" fill="#38BDF8" opacity="0.9"/>
+          <rect x="1" y="30" width="20" height="12" rx="3" fill="#818CF8" opacity="0.9"/>
+          <rect x="27" y="30" width="20" height="12" rx="3" fill="#34D399" opacity="0.9"/>
+          <line x1="24" y1="14" x2="11" y2="30" stroke="#475569" stroke-width="2"/>
+          <line x1="24" y1="14" x2="37" y2="30" stroke="#475569" stroke-width="2"/>
+          <line x1="21" y1="36" x2="27" y2="36" stroke="#475569" stroke-width="2" stroke-dasharray="3 2"/>
+        </svg>
+      </div>
+      <div class="loading-title">Schelio</div>
+      <div class="loading-status" id="loadingStatus">Connecting to Salesforce…</div>
+      <div class="loading-bar"><div class="loading-bar-fill" id="loadingBar"></div></div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <svg width="24" height="24" viewBox="0 0 48 48" fill="none">
+          <rect x="14" y="2" width="20" height="12" rx="3" fill="#38BDF8"/>
+          <rect x="1" y="30" width="20" height="12" rx="3" fill="#818CF8"/>
+          <rect x="27" y="30" width="20" height="12" rx="3" fill="#34D399"/>
+          <line x1="24" y1="14" x2="11" y2="30" stroke="#475569" stroke-width="2"/>
+          <line x1="24" y1="14" x2="37" y2="30" stroke="#475569" stroke-width="2"/>
+        </svg>
+        <span>Schelio</span>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <!-- Search Tabs -->
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-tab="objects">Objects</button>
+      <button class="sidebar-tab" data-tab="fields">Fields</button>
+    </div>
+
+    <!-- Object Search Panel -->
+    <div class="tab-panel active" id="tabObjects">
+      <div class="sidebar-search">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input type="text" id="searchInput" placeholder="Search objects…" autocomplete="off" />
+      </div>
+
+      <div class="sidebar-filters">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="standard">Standard</button>
+        <button class="filter-btn" data-filter="custom">Custom</button>
+      </div>
+
+      <div class="sidebar-objects" id="objectList"></div>
+    </div>
+
+    <!-- Field Search Panel -->
+    <div class="tab-panel" id="tabFields">
+      <div class="sidebar-search">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input type="text" id="fieldSearchInput" placeholder="Search fields across objects…" autocomplete="off" />
+      </div>
+      <div class="field-search-hint" id="fieldSearchHint">Search by field name or API name across all loaded objects</div>
+      <div class="sidebar-objects" id="fieldResults"></div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-footer-row">
+        <div class="object-count" id="objectCount">0 objects</div>
+        <div class="layout-actions">
+          <button class="layout-btn" id="btnSaveLayout" title="Save layout">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 1H3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V4l-2-3z" stroke="currentColor" stroke-width="1.3"/><path d="M5 1v4h6V1M5 15v-5h6v5" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+          <button class="layout-btn" id="btnLoadLayout" title="Load layout">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 13h12M8 1v9M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Canvas -->
+  <main class="canvas-area" id="canvasArea">
+    <!-- Toolbar -->
+    <div class="toolbar" id="toolbar">
+      <div class="toolbar-left">
+        <button class="tool-btn" id="btnZoomIn" title="Zoom in">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M12 12l4 4M8 5.5v5M5.5 8h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tool-btn" id="btnZoomOut" title="Zoom out">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M12 12l4 4M5.5 8h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tool-btn" id="btnFitAll" title="Fit all">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 9h6M9 6v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/></svg>
+        </button>
+        <div class="toolbar-sep"></div>
+        <button class="tool-btn" id="btnAutoLayout" title="Auto layout">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="12" y="1" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="12" y="13" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M6 5h6M14.5 5v8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tool-btn" id="btnToggleRelations" title="Toggle relationships">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="4" cy="9" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="14" cy="9" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M6 9h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="toolbar-center">
+        <span class="zoom-label" id="zoomLabel">100%</span>
+      </div>
+      <div class="toolbar-right">
+        <button class="tool-btn" id="btnExportPng" title="Export PNG">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12v2a2 2 0 002 2h8a2 2 0 002-2v-2M9 2v10M5 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>PNG</span>
+        </button>
+        <button class="tool-btn" id="btnExportSvg" title="Export SVG">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12v2a2 2 0 002 2h8a2 2 0 002-2v-2M9 2v10M5 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>SVG</span>
+        </button>
+        <button class="tool-btn" id="btnExportMermaid" title="Export Mermaid">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M5 7h8M5 10h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <span>Mermaid</span>
+        </button>
+        <div class="toolbar-sep"></div>
+        <button class="tool-btn tool-btn-accent" id="btnExportPdf" title="Export PDF Technical Spec">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 1h7l4 4v10a2 2 0 01-2 2H4a2 2 0 01-2-2V3a2 2 0 012-2z" stroke="currentColor" stroke-width="1.3"/><path d="M11 1v4h4M6 9h6M6 12h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <span>PDF Spec</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- SVG Canvas -->
+    <svg id="erdCanvas" class="erd-canvas">
+      <defs>
+        <pattern id="gridPattern" width="30" height="30" patternUnits="userSpaceOnUse">
+          <circle cx="15" cy="15" r="0.5" fill="rgba(71,85,105,0.3)"/>
+        </pattern>
+        <marker id="arrowMD" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#818CF8"/>
+        </marker>
+        <marker id="arrowLookup" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#38BDF8"/>
+        </marker>
+        <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
+          <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="rgba(0,0,0,0.4)"/>
+        </filter>
+        <filter id="glowBlue" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feFlood flood-color="#38BDF8" flood-opacity="0.3" result="color"/>
+          <feComposite in="color" in2="blur" operator="in"/>
+          <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#gridPattern)" class="grid-bg"/>
+      <g id="erdRelationships"></g>
+      <g id="erdNodes"></g>
+    </svg>
+
+    <!-- Detail Panel -->
+    <div class="detail-panel" id="detailPanel">
+      <div class="detail-header">
+        <h3 id="detailTitle">Object Details</h3>
+        <button class="detail-close" id="detailClose">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="detail-tabs">
+        <button class="detail-tab active" data-dtab="overview">Overview</button>
+        <button class="detail-tab" data-dtab="recordtypes">Record Types</button>
+        <button class="detail-tab" data-dtab="picklists">Picklists</button>
+        <button class="detail-tab" data-dtab="layouts">Layouts</button>
+        <button class="detail-tab" data-dtab="profiles">Profiles</button>
+      </div>
+      <div class="detail-body" id="detailBody">
+        <div class="detail-tab-panel active" id="dtabOverview"></div>
+        <div class="detail-tab-panel" id="dtabRecordtypes"></div>
+        <div class="detail-tab-panel" id="dtabPicklists"></div>
+        <div class="detail-tab-panel" id="dtabLayouts"></div>
+        <div class="detail-tab-panel" id="dtabProfiles"></div>
+      </div>
+      <div class="detail-loading hidden" id="detailLoading">
+        <div class="detail-spinner"></div>
+        <span>Loading metadata…</span>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div class="empty-state" id="emptyState">
+      <svg width="64" height="64" viewBox="0 0 48 48" fill="none" opacity="0.3">
+        <rect x="14" y="2" width="20" height="12" rx="3" fill="#38BDF8"/>
+        <rect x="1" y="30" width="20" height="12" rx="3" fill="#818CF8"/>
+        <rect x="27" y="30" width="20" height="12" rx="3" fill="#34D399"/>
+        <line x1="24" y1="14" x2="11" y2="30" stroke="#475569" stroke-width="2"/>
+        <line x1="24" y1="14" x2="37" y2="30" stroke="#475569" stroke-width="2"/>
+      </svg>
+      <h2>Select objects to visualize</h2>
+      <p>Pick objects from the sidebar to build your ERD</p>
+    </div>
+  </main>
+
+  <!-- Mermaid Modal -->
+  <div class="modal-overlay" id="mermaidModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Mermaid ERD Export</h3>
+        <button class="detail-close" id="mermaidModalClose">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <pre id="mermaidCode"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-secondary" id="mermaidModalCancel">Close</button>
+        <button class="modal-btn modal-btn-primary" id="mermaidCopy">Copy to clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast">
+    <span class="toast-icon" id="toastIcon">✓</span>
+    <span id="toastMsg">Saved!</span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

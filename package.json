@@ -1,0 +1,13 @@
+{
+  "name": "schelio",
+  "version": "2.0.0",
+  "description": "A beautiful, interactive Entity Relationship Diagram viewer for Salesforce",
+  "private": true,
+  "scripts": {
+    "dev": "live-server --port=3000 --open=app.html",
+    "start": "live-server --port=3000 --open=app.html"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  }
+}

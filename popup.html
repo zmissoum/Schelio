@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=DM+Sans:wght@400;500;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 360px;
+      font-family: 'DM Sans', sans-serif;
+      background: #0B1121;
+      color: #E2E8F0;
+      overflow: hidden;
+    }
+
+    .header {
+      padding: 20px 20px 16px;
+      background: linear-gradient(135deg, #0B1121 0%, #162032 100%);
+      border-bottom: 1px solid rgba(56, 189, 248, 0.1);
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #38BDF8, #818CF8);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon svg { width: 20px; height: 20px; }
+
+    .logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38BDF8, #818CF8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.3px;
+    }
+
+    .version {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: #475569;
+      margin-left: auto;
+      background: rgba(71, 85, 105, 0.2);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .subtitle {
+      font-size: 12px;
+      color: #64748B;
+      padding-left: 42px;
+    }
+
+    .content { padding: 16px 20px; }
+
+    .status-card {
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid rgba(71, 85, 105, 0.3);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.connected { background: #34D399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
+    .status-dot.disconnected { background: #F87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
+
+    .org-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #94A3B8;
+      margin-top: 6px;
+      padding-left: 16px;
+      word-break: break-all;
+    }
+
+    .input-group { margin-bottom: 14px; }
+
+    .input-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 6px;
+    }
+
+    .input-group input, .input-group textarea {
+      width: 100%;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(71, 85, 105, 0.4);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #E2E8F0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-group input:focus, .input-group textarea:focus {
+      border-color: #38BDF8;
+    }
+
+    .input-group textarea {
+      height: 60px;
+      resize: none;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: #64748B;
+      margin-top: 4px;
+    }
+
+    .btn-launch {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #38BDF8, #818CF8);
+      color: #0B1121;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-launch:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(56, 189, 248, 0.3);
+    }
+
+    .btn-launch:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-manual {
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      color: #64748B;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      border: 1px dashed rgba(71, 85, 105, 0.4);
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: all 0.2s;
+    }
+
+    .btn-manual:hover {
+      color: #94A3B8;
+      border-color: #94A3B8;
+    }
+
+    .manual-form {
+      display: none;
+      margin-top: 14px;
+    }
+
+    .manual-form.visible { display: block; }
+
+    .separator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 0;
+      font-size: 11px;
+      color: #475569;
+    }
+
+    .separator::before, .separator::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(71, 85, 105, 0.3);
+    }
+
+    .footer {
+      padding: 12px 20px;
+      border-top: 1px solid rgba(71, 85, 105, 0.15);
+      text-align: center;
+      font-size: 11px;
+      color: #475569;
+    }
+    .footer a { color: #38BDF8; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo-row">
+      <div class="logo-icon">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="6" y="1" width="8" height="5" rx="1.5" fill="#0B1121"/>
+          <rect x="0.5" y="12" width="8" height="5" rx="1.5" fill="#0B1121"/>
+          <rect x="11.5" y="12" width="8" height="5" rx="1.5" fill="#0B1121"/>
+          <line x1="10" y1="6" x2="4.5" y2="12" stroke="#0B1121" stroke-width="1.5"/>
+          <line x1="10" y1="6" x2="15.5" y2="12" stroke="#0B1121" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <span class="logo-text">Schelio</span>
+      <span class="version">v1.0</span>
+    </div>
+    <div class="subtitle">Interactive ERD for Salesforce</div>
+  </div>
+
+  <div class="content">
+    <div class="status-card" id="statusCard">
+      <div class="status-row">
+        <div class="status-dot disconnected" id="statusDot"></div>
+        <span id="statusText">Detecting Salesforce session…</span>
+      </div>
+      <div class="org-name" id="orgName"></div>
+    </div>
+
+    <button class="btn-launch" id="btnLaunch" disabled>
+      Open Schema Builder+
+    </button>
+
+    <button class="btn-manual" id="btnManual">
+      Manual connection
+    </button>
+
+    <div class="manual-form" id="manualForm">
+      <div class="separator">Enter credentials</div>
+      <div class="input-group">
+        <label>Instance URL</label>
+        <input type="text" id="inputUrl" placeholder="https://myorg.my.salesforce.com" />
+      </div>
+      <div class="input-group">
+        <label>Session ID</label>
+        <textarea id="inputSession" placeholder="Paste your session ID here…"></textarea>
+        <div class="hint">Find it in Developer Console → Debug → Open Execute Anonymous → UserInfo.getSessionId()</div>
+      </div>
+      <button class="btn-launch" id="btnManualLaunch" style="margin-top:10px;">
+        Connect & Open
+      </button>
+    </div>
+  </div>
+
+  <div class="footer">
+    Built with care — not affiliated with Salesforce®
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

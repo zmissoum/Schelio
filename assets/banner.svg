@@ -1,0 +1,78 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#021B3A"/>
+      <stop offset="50%" stop-color="#032D60"/>
+      <stop offset="100%" stop-color="#0A4A8A"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="35%" cy="65%" r="40%">
+      <stop offset="0%" stop-color="rgba(27,150,255,0.12)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="70%" cy="30%" r="35%">
+      <stop offset="0%" stop-color="rgba(0,180,230,0.08)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="12" r="0.6" fill="rgba(255,255,255,0.06)"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <rect width="1200" height="300" fill="url(#glow1)"/>
+  <rect width="1200" height="300" fill="url(#glow2)"/>
+  <rect width="1200" height="300" fill="url(#dots)"/>
+
+  <!-- Decorative cards left -->
+  <g opacity="0.1">
+    <rect x="60" y="50" width="130" height="80" rx="6" fill="white" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+    <rect x="60" y="50" width="130" height="26" rx="6" fill="rgba(255,255,255,0.1)"/>
+    <rect x="60" y="160" width="130" height="70" rx="6" fill="white" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+    <rect x="60" y="160" width="130" height="26" rx="6" fill="rgba(255,255,255,0.08)"/>
+    <rect x="220" y="100" width="130" height="75" rx="6" fill="white" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+    <rect x="220" y="100" width="130" height="26" rx="6" fill="rgba(255,255,255,0.1)"/>
+  </g>
+  <path d="M 190 90 C 210 90, 220 120, 220 120" stroke="rgba(27,150,255,0.12)" stroke-width="1.5" fill="none"/>
+  <path d="M 190 185 C 230 185, 260 150, 285 150" stroke="rgba(0,180,230,0.1)" stroke-width="1.5" fill="none"/>
+
+  <!-- Decorative cards right -->
+  <g opacity="0.08">
+    <rect x="920" y="45" width="120" height="65" rx="6" fill="white"/>
+    <rect x="1060" y="85" width="110" height="55" rx="6" fill="white"/>
+    <rect x="960" y="160" width="125" height="75" rx="6" fill="white"/>
+  </g>
+
+  <!-- Logo + Title -->
+  <g transform="translate(430, 80)">
+    <!-- Logomark -->
+    <circle cx="20" cy="16" r="10" fill="#1B96FF"/>
+    <circle cx="38" cy="38" r="10" fill="#00B4E6"/>
+    <circle cx="20" cy="60" r="10" fill="#0176D3"/>
+    <line x1="25" y1="23" x2="33" y2="31" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="33" y1="45" x2="25" y2="53" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+
+  <text x="500" y="120" font-family="system-ui, -apple-system, sans-serif" font-size="46" font-weight="800" fill="white" letter-spacing="-1.5">Schelio</text>
+  <text x="430" y="158" font-family="system-ui, -apple-system, sans-serif" font-size="16" fill="rgba(255,255,255,0.55)">The Salesforce Schema Builder, reimagined.</text>
+
+  <!-- Tags -->
+  <g transform="translate(430, 178)">
+    <rect width="100" height="24" rx="5" fill="rgba(27,150,255,0.12)" stroke="rgba(27,150,255,0.25)" stroke-width="1"/>
+    <text x="50" y="16" font-family="monospace" font-size="10" fill="#1B96FF" text-anchor="middle">Interactive ERD</text>
+  </g>
+  <g transform="translate(540, 178)">
+    <rect width="80" height="24" rx="5" fill="rgba(127,86,217,0.12)" stroke="rgba(127,86,217,0.25)" stroke-width="1"/>
+    <text x="40" y="16" font-family="monospace" font-size="10" fill="#A78BFA" text-anchor="middle">PDF Spec</text>
+  </g>
+  <g transform="translate(630, 178)">
+    <rect width="72" height="24" rx="5" fill="rgba(0,180,230,0.12)" stroke="rgba(0,180,230,0.25)" stroke-width="1"/>
+    <text x="36" y="16" font-family="monospace" font-size="10" fill="#00B4E6" text-anchor="middle">Mermaid</text>
+  </g>
+  <g transform="translate(712, 178)">
+    <rect width="80" height="24" rx="5" fill="rgba(255,107,43,0.12)" stroke="rgba(255,107,43,0.25)" stroke-width="1"/>
+    <text x="40" y="16" font-family="monospace" font-size="10" fill="#FF6B2B" text-anchor="middle">Zero Deps</text>
+  </g>
+
+  <!-- Bottom accent line -->
+  <rect y="296" width="1200" height="4" fill="#1B96FF" opacity="0.3"/>
+</svg>
