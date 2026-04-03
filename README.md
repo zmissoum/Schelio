@@ -92,7 +92,7 @@ Perfect for feeding into a spec, handing off to a new team, or documenting an or
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/schelio.git
+git clone https://github.com/zmissoum/Schelio.git
 
 # 2. Open Chrome extensions page
 #    Navigate to chrome://extensions/
@@ -217,7 +217,7 @@ Schelio requires the following Chrome permissions:
 - [ ] Chrome Web Store publication
 - [ ] i18n (French, Spanish, German)
 
-See the [open issues](https://github.com/YOUR_USERNAME/schelio/issues) for a full list of proposed features and known bugs.
+See the [open issues](https://github.com/zmissoum/Schelio/issues) for a full list of proposed features and known bugs.
 
 ## Contributing
 
