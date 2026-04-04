@@ -1334,38 +1334,38 @@ ${objectSections}${erdSummary}
   async function fetchAutomation(objectApi) {
     if(automationCache[objectApi]) return automationCache[objectApi];
     const result={flows:[],triggers:[]};
-    // Try multiple approaches to find flows for this object
+    // FlowDefinitionView is a standard REST API object, not Tooling
+    const mapFlows=(records)=>(records||[]).map(f=>({
+      MasterLabel:f.Label||f.MasterLabel, DeveloperName:f.ApiName||f.DeveloperName,
+      ProcessType:f.ProcessType, TriggerType:f.TriggerType,
+      RecordTriggerType:f.RecordTriggerType, Status:f.IsActive?'Active':'Inactive',
+      Description:f.Description, Definition:{DeveloperName:f.ApiName||f.DeveloperName}
+    }));
     try {
-      // Method 1: FlowDefinitionView (most reliable, available v46+)
-      const flowData=await sfToolingQuery(
-        "SELECT Id, DeveloperName, Label, ProcessType, TriggerType, "+
-        "TriggerObjectOrEventLabel, IsActive, Description, RecordTriggerType "+
-        "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"' "+
-        "ORDER BY Label"
+      // Method 1: REST API query on FlowDefinitionView by API name
+      const flowData=await sfApi(
+        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
+          "SELECT ApiName, Label, ProcessType, TriggerType, RecordTriggerType, "+
+          "TriggerObjectOrEventLabel, IsActive, Description "+
+          "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"' ORDER BY Label"
+        )
       );
-      result.flows=(flowData.records||[]).map(f=>({
-        MasterLabel:f.Label, DeveloperName:f.DeveloperName,
-        ProcessType:f.ProcessType, TriggerType:f.TriggerType,
-        RecordTriggerType:f.RecordTriggerType, Status:f.IsActive?'Active':'Inactive',
-        Description:f.Description, Definition:{DeveloperName:f.DeveloperName}
-      }));
+      result.flows=mapFlows(flowData.records);
     } catch(e) {
       try {
-        // Method 2: try with object label instead of API name
+        // Method 2: fallback with object label
         const meta=objectMeta[objectApi];
         const label=meta?meta.label:objectApi;
-        const flowData2=await sfToolingQuery(
-          "SELECT Id, DeveloperName, Label, ProcessType, TriggerType, "+
-          "TriggerObjectOrEventLabel, IsActive, Description, RecordTriggerType "+
-          "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(label)+"' "+
-          "ORDER BY Label"
-        );
-        result.flows=(flowData2.records||[]).map(f=>({
-          MasterLabel:f.Label, DeveloperName:f.DeveloperName,
-          ProcessType:f.ProcessType, TriggerType:f.TriggerType,
-          RecordTriggerType:f.RecordTriggerType, Status:f.IsActive?'Active':'Inactive',
-          Description:f.Description, Definition:{DeveloperName:f.DeveloperName}
-        }));
+        if(label!==objectApi){
+          const flowData2=await sfApi(
+            '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
+              "SELECT ApiName, Label, ProcessType, TriggerType, RecordTriggerType, "+
+              "TriggerObjectOrEventLabel, IsActive, Description "+
+              "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(label)+"' ORDER BY Label"
+            )
+          );
+          result.flows=mapFlows(flowData2.records);
+        }
       } catch(e2) { console.warn('Flow query failed for',objectApi,e2); }
     }
     try {
