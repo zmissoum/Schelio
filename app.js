@@ -1086,9 +1086,18 @@ ${objectSections}${erdSummary}
 
   function renderRelationships2(){
     erdRels.innerHTML='';if(!showRelations)return;
+
+    // Group relationships by object pair
+    const grouped={};
     relationships.forEach(rel=>{
-      const fp=nodePositions[rel.from],tp=nodePositions[rel.to];if(!fp||!tp)return;
-      const fn=erdNodes.querySelector('[data-api="'+rel.from+'"]'),tn=erdNodes.querySelector('[data-api="'+rel.to+'"]');
+      const key=[rel.from,rel.to].sort().join('||');
+      if(!grouped[key]) grouped[key]={from:rel.from,to:rel.to,rels:[]};
+      grouped[key].rels.push(rel);
+    });
+
+    Object.values(grouped).forEach(group=>{
+      const fp=nodePositions[group.from],tp=nodePositions[group.to];if(!fp||!tp)return;
+      const fn=erdNodes.querySelector('[data-api="'+group.from+'"]'),tn=erdNodes.querySelector('[data-api="'+group.to+'"]');
       const fH=fn?parseInt(fn.dataset.height)||200:200,tH=tn?parseInt(tn.dataset.height)||200:200;
       const fcx=fp.x+CARD_WIDTH/2,fcy=fp.y+fH/2,tcx=tp.x+CARD_WIDTH/2,tcy=tp.y+tH/2;
       let x1,y1,x2,y2;const dx=tcx-fcx,dy=tcy-fcy;
@@ -1096,9 +1105,52 @@ ${objectSections}${erdSummary}
       else{if(dy>0){x1=fcx;y1=fp.y+fH;x2=tcx;y2=tp.y;}else{x1=fcx;y1=fp.y;x2=tcx;y2=tp.y+tH;}}
       const mx=(x1+x2)/2,my=(y1+y2)/2;let cx1,cy1,cx2,cy2;
       if(Math.abs(dx)>Math.abs(dy)){cx1=mx;cy1=y1;cx2=mx;cy2=y2;}else{cx1=x1;cy1=my;cx2=x2;cy2=my;}
-      erdRels.appendChild(svgEl('path',{class:'rel-line '+rel.type,d:'M '+x1+' '+y1+' C '+cx1+' '+cy1+', '+cx2+' '+cy2+', '+x2+' '+y2,'marker-end':rel.type==='master-detail'?'url(#arrowMD)':'url(#arrowLookup)'}));
-      const l=svgEl('text',{class:'rel-label',x:mx,y:my-6,'text-anchor':'middle'});l.textContent=rel.field;erdRels.appendChild(l);
+
+      const hasMD=group.rels.some(r=>r.type==='master-detail');
+      const pathD='M '+x1+' '+y1+' C '+cx1+' '+cy1+', '+cx2+' '+cy2+', '+x2+' '+y2;
+      const count=group.rels.length;
+
+      // Invisible wider hit area for click
+      const hitPath=svgEl('path',{d:pathD,fill:'none',stroke:'transparent','stroke-width':'16',style:'cursor:pointer'});
+      const tooltip=group.rels.map(r=>(r.type==='master-detail'?'[MD] ':'[LK] ')+r.field+' ('+r.from+' → '+r.to+')').join('\n');
+      const tipEl=svgEl('title',{});tipEl.textContent=tooltip;hitPath.appendChild(tipEl);
+      hitPath.addEventListener('click',()=>{
+        showRelTooltip(mx,my,group.rels);
+      });
+      erdRels.appendChild(hitPath);
+
+      // Visible line
+      const lineWidth=Math.min(1.5+count*0.5,4);
+      erdRels.appendChild(svgEl('path',{class:'rel-line '+(hasMD?'master-detail':'lookup'),d:pathD,'stroke-width':lineWidth,'marker-end':hasMD?'url(#arrowMD)':'url(#arrowLookup)'}));
+
+      // Label
+      const labelText=count>1?count+' relations':group.rels[0].field;
+      const l=svgEl('text',{class:'rel-label',x:mx,y:my-8,'text-anchor':'middle'});l.textContent=labelText;erdRels.appendChild(l);
     });
+  }
+
+  // ═══ RELATIONSHIP TOOLTIP ═══
+  function showRelTooltip(svgX,svgY,rels){
+    // Remove existing
+    const old=$('#relTooltip');if(old)old.remove();
+    // Convert SVG coords to screen
+    const r=erdCanvas.getBoundingClientRect();
+    const screenX=r.left+svgX*zoom+panX;
+    const screenY=r.top+svgY*zoom+panY;
+
+    const div=document.createElement('div');
+    div.id='relTooltip';div.className='rel-tooltip';
+    let h='<div class="rel-tooltip-title">Relationships ('+rels.length+')</div>';
+    rels.forEach(rel=>{
+      const badge=rel.type==='master-detail'?'<span class="rel-tooltip-badge md">MD</span>':'<span class="rel-tooltip-badge lk">LK</span>';
+      h+='<div class="rel-tooltip-row">'+badge+'<span class="rel-tooltip-field">'+escHtml(rel.field)+'</span><span class="rel-tooltip-path">'+escHtml(rel.from)+' → '+escHtml(rel.to)+'</span></div>';
+    });
+    div.innerHTML=h;
+    div.style.left=screenX+'px';div.style.top=(screenY+16)+'px';
+    document.body.appendChild(div);
+    // Auto-close
+    const close=()=>{div.remove();document.removeEventListener('click',close);};
+    setTimeout(()=>document.addEventListener('click',close),50);
   }
 
   // ═══ SVG HELPERS ═══

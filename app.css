@@ -1492,6 +1492,57 @@ html, body {
 
 .modal-btn-secondary:hover { border-color: var(--text-faint); color: var(--text-primary); }
 
+/* ═══ RELATIONSHIP TOOLTIP ═══ */
+.rel-tooltip {
+  position: fixed;
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-width: 220px;
+  max-width: 380px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  font-family: var(--font-sans);
+}
+.rel-tooltip-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.rel-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.rel-tooltip-row:last-child { border-bottom: none; }
+.rel-tooltip-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.rel-tooltip-badge.md { background: rgba(129,140,248,0.2); color: var(--accent-indigo); }
+.rel-tooltip-badge.lk { background: rgba(56,189,248,0.2); color: var(--accent-blue); }
+.rel-tooltip-field {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.rel-tooltip-path {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-left: auto;
+}
+
 /* ═══ COPY BUTTON ═══ */
 .copy-btn {
   display: inline-flex;
