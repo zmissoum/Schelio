@@ -1169,11 +1169,22 @@ ${objectSections}${erdSummary}
     const result={flows:[],triggers:[]};
     try {
       const flowData=await sfToolingQuery(
-        "SELECT Id, DeveloperName, MasterLabel, ProcessType, TriggerType, TriggerObjectOrEventLabel "+
-        "FROM FlowDefinition WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"'"
+        "SELECT Id, Definition.DeveloperName, MasterLabel, ProcessType, TriggerType, Status, "+
+        "TriggerObjectOrEvent.QualifiedApiName, RecordTriggerType, Description "+
+        "FROM Flow WHERE TriggerObjectOrEvent.QualifiedApiName = '"+escSoql(objectApi)+"' "+
+        "AND Status = 'Active' ORDER BY MasterLabel"
       );
       result.flows=flowData.records||[];
-    } catch(e) { console.warn('FlowDefinition query failed',e); }
+    } catch(e) {
+      // Fallback: try FlowDefinition (older orgs)
+      try {
+        const flowData2=await sfToolingQuery(
+          "SELECT Id, DeveloperName, MasterLabel, ProcessType, TriggerType "+
+          "FROM FlowDefinition WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"'"
+        );
+        result.flows=flowData2.records||[];
+      } catch(e2) { console.warn('Flow query failed',e,e2); }
+    }
     try {
       const trigData=await sfToolingQuery(
         "SELECT Id, Name, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, "+
@@ -1192,10 +1203,16 @@ ${objectSections}${erdSummary}
     h+='<div class="detail-section"><div class="detail-section-title">Flows ('+data.flows.length+')</div>';
     if(data.flows.length){
       data.flows.forEach(f=>{
+        const devName=f.Definition?.DeveloperName||f.DeveloperName||'';
+        const triggerType=f.RecordTriggerType||f.TriggerType||'—';
         h+='<div class="layout-card"><div class="layout-card-header">';
         h+='<span class="layout-card-icon">⚡</span>';
-        h+='<div class="layout-card-info"><div class="layout-card-name">'+escHtml(f.MasterLabel||f.DeveloperName)+'</div>';
-        h+='<div class="layout-card-type">'+(f.ProcessType||'Flow')+' · '+(f.TriggerType||'—')+'</div></div></div></div>';
+        h+='<div class="layout-card-info"><div class="layout-card-name">'+escHtml(f.MasterLabel||devName)+' '+copyBtn(devName)+'</div>';
+        h+='<div class="layout-card-type">'+(f.ProcessType||'Flow')+' · '+triggerType+(f.Status?' · '+f.Status:'')+'</div></div>';
+        if(f.Status) h+='<span class="rt-badge '+(f.Status==='Active'?'active':'inactive')+'">'+escHtml(f.Status)+'</span>';
+        h+='</div>';
+        if(f.Description) h+='<div class="layout-card-body"><div class="layout-assignment"><span>'+escHtml(f.Description)+'</span></div></div>';
+        h+='</div>';
       });
     } else { h+='<div class="empty-tab-msg">No record-triggered flows found.</div>'; }
     h+='</div>';
