@@ -85,7 +85,7 @@
 
   async function fetchObjectList() {
     const data = await sfApi('/services/data/'+SF_API_VERSION+'/sobjects/');
-    allObjects = data.sobjects.filter(o=>o.queryable&&!o.name.endsWith('__History')&&!o.name.endsWith('__Feed')&&!o.name.endsWith('__Share')&&!o.name.endsWith('__Tag')&&!o.name.endsWith('ChangeEvent')).sort((a,b)=>a.label.localeCompare(b.label));
+    allObjects = data.sobjects.filter(o=>o.queryable&&!o.name.endsWith('__History')&&!o.name.endsWith('__Feed')&&!o.name.endsWith('__Share')&&!o.name.endsWith('__Tag')&&!o.name.endsWith('ChangeEvent')&&!o.label.includes('__MISSING LABEL__')).sort((a,b)=>a.label.localeCompare(b.label));
     renderObjectList(); objectCount.textContent=allObjects.length+' objects';
   }
 
