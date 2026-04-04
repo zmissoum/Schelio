@@ -52,7 +52,23 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 - **Smart field display** — Fields sorted by importance (Id → References → alphabetical), typed icons
 - **Relationship lines** — Curved bezier paths with arrows, color-coded by type (Lookup vs Master-Detail)
 - **Auto-layout** — Intelligent grid positioning based on relationship density
-- **Detail panel** — Double-click any card for full field list, metadata, and relationships
+- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` for all canvas operations
+- **Context menu** — Right-click any card for quick actions (details, remove, copy API name, export)
+- **Detail panel** — Double-click any card for full metadata (see below)
+
+### Detail Panel (8 tabs)
+
+| Tab | Content |
+|-----|---------|
+| **Overview** | Fields, relationships, metadata with copy buttons on API names |
+| **Record Types** | Active/inactive RTs with IDs and defaults |
+| **Picklists** | Values by Record Type + **dependent picklist visualization** with interactive filtering |
+| **Layouts** | Page Layouts, Lightning Record Pages, RT-to-Layout mapping |
+| **Profiles** | CRUD permissions + Field-Level Security per profile |
+| **Permission Sets** | CRUD permissions per Permission Set |
+| **Rules** | Validation Rules with **formulas**, error messages, and status |
+| **Automation** | Record-triggered Flows and Apex Triggers with events |
+| **Health** | Schema health score (/100), limit bars, and warnings |
 
 ### Cross-Object Field Search
 - Search by field label, API name, or type across **all loaded objects**
@@ -71,6 +87,8 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 | **PNG** | High-resolution screenshot of your current ERD |
 | **SVG** | Vector export, perfect for embedding in docs |
 | **Mermaid** | Full ERD in Mermaid syntax, ready for GitHub/Notion/Confluence |
+| **PlantUML** | Full ERD in PlantUML syntax |
+| **CSV** | Field inventory spreadsheet across all selected objects |
 | **PDF Spec** | Complete technical data model spec document (see below) |
 
 ### PDF Technical Specification
@@ -85,6 +103,9 @@ The standout feature: generate a **print-ready technical specification** includi
 - Ready to save as PDF via browser print dialog
 
 Perfect for feeding into a spec, handing off to a new team, or documenting an org.
+
+### Dark / Light Theme
+Toggle between dark (blueprint) and light themes — persisted in your browser.
 
 ## Installation
 
@@ -145,11 +166,15 @@ If auto-detection doesn't work (e.g. enhanced security, SSO):
 | `Ctrl` + `0` | Fit all objects in view |
 | `Ctrl` + `S` | Save current layout |
 | `Ctrl` + `F` | Open field search |
+| `Ctrl` + `Z` | Undo |
+| `Ctrl` + `Y` | Redo |
 | `Escape` | Close panels/modals |
 | `Scroll wheel` | Zoom in/out at cursor |
 | `Click + drag` (canvas) | Pan the view |
 | `Click + drag` (card) | Move a card |
 | `Double-click` (card) | Open detail panel |
+| `Right-click` (card) | Context menu |
+| `Shift + click` (sidebar) | Multi-select objects |
 
 ## Architecture
 
@@ -208,12 +233,19 @@ Schelio requires the following Chrome permissions:
 
 ## Roadmap
 
+- [x] PlantUML export
+- [x] Dark/light theme toggle
+- [x] Validation Rules with formulas
+- [x] Flows & Triggers visualization
+- [x] Schema health score & limit warnings
+- [x] Permission Sets support
+- [x] Undo/Redo on canvas
+- [x] Dependent picklist visualization
+- [x] CSV field inventory export
 - [ ] Firefox support (Manifest V3 compat)
 - [ ] Force-directed graph layout (physics-based)
 - [ ] Field-level dependency tracking (which flows/triggers use a field)
 - [ ] Org-to-org schema comparison
-- [ ] PlantUML export
-- [ ] Dark/light theme toggle
 - [ ] Chrome Web Store publication
 - [ ] i18n (French, Spanish, German)
 
