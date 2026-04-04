@@ -276,11 +276,11 @@
     }).join('');
     const items=objectList.querySelectorAll('.obj-item');
     let lastClickedIdx=-1;
-    items.forEach((el,idx)=>el.addEventListener('click',(e)=>{
+    items.forEach((el,idx)=>el.addEventListener('click',async(e)=>{
       if(e.shiftKey&&lastClickedIdx>=0){
         const start=Math.min(lastClickedIdx,idx),end=Math.max(lastClickedIdx,idx);
-        for(let i=start;i<=end;i++){const api=items[i].dataset.api;if(!selectedObjects.has(api))toggleObject(api);}
-      } else { toggleObject(el.dataset.api); }
+        for(let i=start;i<=end;i++){const api=items[i].dataset.api;if(!selectedObjects.has(api))await toggleObject(api);}
+      } else { await toggleObject(el.dataset.api); }
       lastClickedIdx=idx;
     }));
   }
@@ -1062,13 +1062,14 @@ ${objectSections}${erdSummary}
   function onCanvasMouseMove(e){if(dragNode){const pt=svgPoint(e);nodePositions[dragNode]={x:pt.x-dragOffset.x,y:pt.y-dragOffset.y};renderERD();}else if(isPanning){panX+=e.clientX-panStart.x;panY+=e.clientY-panStart.y;panStart.x=e.clientX;panStart.y=e.clientY;applyTransform();}}
   function onCanvasMouseUp(){dragNode=null;isPanning=false;erdCanvas.style.cursor='grab';}
   function svgPoint(e){const r=erdCanvas.getBoundingClientRect();return{x:(e.clientX-r.left-panX)/zoom,y:(e.clientY-r.top-panY)/zoom};}
-  function autoLayout(){const items=[...selectedObjects];if(!items.length)return;const cols=Math.ceil(Math.sqrt(items.length));const rc={};items.forEach(n=>{rc[n]=0;});relationships.forEach(r=>{rc[r.from]=(rc[r.from]||0)+1;rc[r.to]=(rc[r.to]||0)+1;});items.sort((a,b)=>(rc[b]||0)-(rc[a]||0));items.forEach((a,i)=>{nodePositions[a]={x:60+(i%cols)*(CARD_WIDTH+100),y:60+Math.floor(i/cols)*380};});fitAll();renderERD();}
+  function autoLayout(){const items=[...selectedObjects];if(!items.length)return;pushUndo();const cols=Math.ceil(Math.sqrt(items.length));const rc={};items.forEach(n=>{rc[n]=0;});relationships.forEach(r=>{rc[r.from]=(rc[r.from]||0)+1;rc[r.to]=(rc[r.to]||0)+1;});items.sort((a,b)=>(rc[b]||0)-(rc[a]||0));items.forEach((a,i)=>{nodePositions[a]={x:60+(i%cols)*(CARD_WIDTH+100),y:60+Math.floor(i/cols)*380};});fitAll();renderERD();}
   function fitAll(){if(!selectedObjects.size)return;let mx=Infinity,my=Infinity,Mx=-Infinity,My=-Infinity;selectedObjects.forEach(a=>{const p=nodePositions[a];if(!p)return;mx=Math.min(mx,p.x);my=Math.min(my,p.y);Mx=Math.max(Mx,p.x+CARD_WIDTH);My=Math.max(My,p.y+300);});const r=erdCanvas.getBoundingClientRect();const cw=Mx-mx+100,ch=My-my+100;zoom=Math.max(0.2,Math.min(r.width/cw,r.height/ch,1.5));panX=(r.width-cw*zoom)/2-mx*zoom+50;panY=(r.height-ch*zoom)/2-my*zoom+50;applyTransform();}
 
   function exportPng(){const b=new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'});const u=URL.createObjectURL(b);const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=erdCanvas.clientWidth*2;c.height=erdCanvas.clientHeight*2;const ctx=c.getContext('2d');ctx.fillStyle='#060D1B';ctx.fillRect(0,0,c.width,c.height);ctx.scale(2,2);ctx.drawImage(img,0,0);URL.revokeObjectURL(u);c.toBlob(bl=>{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download='schelio-erd.png';a.click();});};img.src=u;}
   function exportSvg(){const a=document.createElement('a');const url=URL.createObjectURL(new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'}));a.href=url;a.download='schelio-erd.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
   // ═══ CSV EXPORT ═══
+  function escCsv(s){return '"'+String(s).replace(/"/g,'""')+'"';}
   function exportCsv() {
     const selected=[...selectedObjects];
     if(!selected.length){showToast('Select objects first','⚠️');return;}
@@ -1077,7 +1078,7 @@ ${objectSections}${erdSummary}
       const meta=objectMeta[api];if(!meta)return;
       meta.fields.filter(f=>!f.deprecatedAndHidden).sort((a,b)=>a.label.localeCompare(b.label)).forEach(f=>{
         const ref=(f.referenceTo||[]).join('; ');
-        csv+='"'+meta.label+'","'+f.label+'","'+f.name+'","'+f.type+'",'+(f.length||f.precision||'')+','+(f.nillable?'':'Yes')+','+(f.custom?'Yes':'')+','+(ref?'"'+ref+"'":'')+'\n';
+        csv+=escCsv(meta.label)+','+escCsv(f.label)+','+escCsv(f.name)+','+escCsv(f.type)+','+(f.length||f.precision||'')+','+(f.nillable?'':'Yes')+','+(f.custom?'Yes':'')+','+(ref?escCsv(ref):'')+'\n';
       });
     });
     const a=document.createElement('a');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
@@ -1091,7 +1092,7 @@ ${objectSections}${erdSummary}
     selectedObjects.forEach(api=>{
       const meta=objectMeta[api];if(!meta)return;
       const safe=api.replace(/[^a-zA-Z0-9_]/g,'_');
-      uml+='entity "'+meta.label+'" as '+safe+' {\n';
+      uml+='entity "'+meta.label.replace(/"/g,'\\"')+'" as '+safe+' {\n';
       const fields=meta.fields.filter(f=>!f.deprecatedAndHidden).sort((a,b)=>{if(a.name==='Id')return-1;if(b.name==='Id')return 1;return a.label.localeCompare(b.label);});
       const pkFields=fields.filter(f=>f.name==='Id');
       const fkFields=fields.filter(f=>f.type==='reference');
@@ -1150,7 +1151,7 @@ ${objectSections}${erdSummary}
     });
     h+='</div>';
     $('#dtabValidations').innerHTML=h;
-    $('#dtabValidations').querySelectorAll('.copy-btn').forEach(b=>b.addEventListener('click',()=>copyToClipboard(b.dataset.copy)));
+    // copy-btn handled by document-level delegation
   }
 
   // ═══ FLOWS & TRIGGERS (Tooling API) ═══
@@ -1211,7 +1212,7 @@ ${objectSections}${erdSummary}
     } else { h+='<div class="empty-tab-msg">No Apex triggers found.</div>'; }
     h+='</div>';
     $('#dtabAutomation').innerHTML=h;
-    $('#dtabAutomation').querySelectorAll('.copy-btn').forEach(b=>b.addEventListener('click',()=>copyToClipboard(b.dataset.copy)));
+    // copy-btn handled by document-level delegation
   }
 
   // ═══ SCHEMA HEALTH SCORE ═══
@@ -1311,6 +1312,7 @@ ${objectSections}${erdSummary}
 
   function renderPermSetsInProfilesTab(objectApi, container) {
     fetchPermSetPermissions(objectApi).then(data=>{
+      if(activeDetailObject!==objectApi) return;
       const ps=data.permSets;const names=Object.keys(ps).sort();
       if(!names.length) return;
       let h='<div class="detail-section" style="margin-top:16px"><div class="detail-section-title">Permission Sets ('+names.length+')</div>';
