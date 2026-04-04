@@ -1314,9 +1314,9 @@ ${objectSections}${erdSummary}
     }
     const active=rules.filter(r=>r.Active), inactive=rules.filter(r=>!r.Active);
     let h='<div class="detail-section"><div class="detail-section-title">Validation Rules ('+rules.length+')</div>';
-    h+='<div class="health-stat-row"><span class="health-stat good">'+active.length+' active</span><span class="health-stat neutral">'+inactive.length+' inactive</span></div>';
+    h+='<div class="health-stat-row"><button class="vr-filter-btn active" data-vr-filter="all">All ('+rules.length+')</button><button class="vr-filter-btn" data-vr-filter="active">Active ('+active.length+')</button><button class="vr-filter-btn" data-vr-filter="inactive">Inactive ('+inactive.length+')</button></div>';
     rules.forEach(r=>{
-      h+='<div class="vr-card'+(r.Active?'':' vr-inactive')+'">';
+      h+='<div class="vr-card'+(r.Active?'':' vr-inactive')+'" data-vr-active="'+(r.Active?'1':'0')+'">';
       h+='<div class="vr-header"><span class="vr-name">'+escHtml(r.ValidationName)+' '+copyBtn(r.ValidationName)+'</span>';
       h+='<span class="rt-badge '+(r.Active?'active':'inactive')+'">'+(r.Active?'Active':'Inactive')+'</span></div>';
       if(r.Description) h+='<div class="vr-desc">'+escHtml(r.Description)+'</div>';
@@ -1327,7 +1327,19 @@ ${objectSections}${erdSummary}
     });
     h+='</div>';
     $('#dtabValidations').innerHTML=h;
-    // copy-btn handled by document-level delegation
+    // Filter buttons
+    document.querySelectorAll('.vr-filter-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        document.querySelectorAll('.vr-filter-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter=btn.dataset.vrFilter;
+        document.querySelectorAll('.vr-card').forEach(card=>{
+          if(filter==='all') card.style.display='';
+          else if(filter==='active') card.style.display=card.dataset.vrActive==='1'?'':'none';
+          else card.style.display=card.dataset.vrActive==='0'?'':'none';
+        });
+      });
+    });
   }
 
   // ═══ FLOWS & TRIGGERS (Tooling API) ═══
