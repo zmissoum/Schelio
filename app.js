@@ -1062,7 +1062,72 @@ ${objectSections}${erdSummary}
   function onCanvasMouseMove(e){if(dragNode){const pt=svgPoint(e);nodePositions[dragNode]={x:pt.x-dragOffset.x,y:pt.y-dragOffset.y};renderERD();}else if(isPanning){panX+=e.clientX-panStart.x;panY+=e.clientY-panStart.y;panStart.x=e.clientX;panStart.y=e.clientY;applyTransform();}}
   function onCanvasMouseUp(){dragNode=null;isPanning=false;erdCanvas.style.cursor='grab';}
   function svgPoint(e){const r=erdCanvas.getBoundingClientRect();return{x:(e.clientX-r.left-panX)/zoom,y:(e.clientY-r.top-panY)/zoom};}
-  function autoLayout(){const items=[...selectedObjects];if(!items.length)return;pushUndo();const cols=Math.ceil(Math.sqrt(items.length));const rc={};items.forEach(n=>{rc[n]=0;});relationships.forEach(r=>{rc[r.from]=(rc[r.from]||0)+1;rc[r.to]=(rc[r.to]||0)+1;});items.sort((a,b)=>(rc[b]||0)-(rc[a]||0));items.forEach((a,i)=>{nodePositions[a]={x:60+(i%cols)*(CARD_WIDTH+100),y:60+Math.floor(i/cols)*380};});fitAll();renderERD();}
+  function autoLayout(){
+    const items=[...selectedObjects];if(!items.length)return;pushUndo();
+    const r=erdCanvas.getBoundingClientRect();
+    const cx=r.width/2, cy=r.height/2;
+    const n=items.length;
+
+    // Initialize: place nodes in a circle around center
+    const nodes={};
+    items.forEach((api,i)=>{
+      const angle=(2*Math.PI*i)/n;
+      const radius=Math.min(cx,cy)*0.6;
+      nodes[api]={x:cx+Math.cos(angle)*radius, y:cy+Math.sin(angle)*radius, vx:0, vy:0};
+    });
+
+    // Fruchterman-Reingold force-directed layout
+    const area=r.width*r.height;
+    const k=Math.sqrt(area/n)*0.55; // ideal spring length
+    const iterations=300;
+    let temp=Math.min(r.width,r.height)/3;
+
+    for(let iter=0;iter<iterations;iter++){
+      // Repulsive forces between all pairs
+      for(let i=0;i<n;i++){
+        for(let j=i+1;j<n;j++){
+          const a=nodes[items[i]], b=nodes[items[j]];
+          let dx=a.x-b.x, dy=a.y-b.y;
+          let dist=Math.sqrt(dx*dx+dy*dy)||1;
+          let force=(k*k)/dist;
+          let fx=(dx/dist)*force, fy=(dy/dist)*force;
+          a.vx+=fx; a.vy+=fy;
+          b.vx-=fx; b.vy-=fy;
+        }
+      }
+
+      // Attractive forces along edges
+      relationships.forEach(rel=>{
+        const a=nodes[rel.from], b=nodes[rel.to];
+        if(!a||!b)return;
+        let dx=a.x-b.x, dy=a.y-b.y;
+        let dist=Math.sqrt(dx*dx+dy*dy)||1;
+        let force=(dist*dist)/k;
+        // Master-detail: stronger attraction
+        if(rel.type==='master-detail') force*=1.5;
+        let fx=(dx/dist)*force, fy=(dy/dist)*force;
+        a.vx-=fx; a.vy-=fy;
+        b.vx+=fx; b.vy+=fy;
+      });
+
+      // Apply velocities with temperature cooling
+      Object.values(nodes).forEach(nd=>{
+        let disp=Math.sqrt(nd.vx*nd.vx+nd.vy*nd.vy)||1;
+        nd.x+=(nd.vx/disp)*Math.min(disp,temp);
+        nd.y+=(nd.vy/disp)*Math.min(disp,temp);
+        nd.vx=0; nd.vy=0;
+      });
+
+      temp*=0.97; // cooling
+    }
+
+    // Convert to node positions (top-left corner)
+    items.forEach(api=>{
+      nodePositions[api]={x:nodes[api].x-CARD_WIDTH/2, y:nodes[api].y-150};
+    });
+
+    fitAll();renderERD();
+  }
   function fitAll(){if(!selectedObjects.size)return;let mx=Infinity,my=Infinity,Mx=-Infinity,My=-Infinity;selectedObjects.forEach(a=>{const p=nodePositions[a];if(!p)return;mx=Math.min(mx,p.x);my=Math.min(my,p.y);Mx=Math.max(Mx,p.x+CARD_WIDTH);My=Math.max(My,p.y+300);});const r=erdCanvas.getBoundingClientRect();const cw=Mx-mx+100,ch=My-my+100;zoom=Math.max(0.2,Math.min(r.width/cw,r.height/ch,1.5));panX=(r.width-cw*zoom)/2-mx*zoom+50;panY=(r.height-ch*zoom)/2-my*zoom+50;applyTransform();}
 
   function exportPng(){const b=new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'});const u=URL.createObjectURL(b);const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=erdCanvas.clientWidth*2;c.height=erdCanvas.clientHeight*2;const ctx=c.getContext('2d');ctx.fillStyle='#060D1B';ctx.fillRect(0,0,c.width,c.height);ctx.scale(2,2);ctx.drawImage(img,0,0);URL.revokeObjectURL(u);c.toBlob(bl=>{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download='schelio-erd.png';a.click();});};img.src=u;}
