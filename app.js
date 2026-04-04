@@ -562,27 +562,38 @@
       }
     });
 
-    // Method 2: if no validFor, use UI API picklist cache data
+    // Method 2: if no validFor from describe, use UI API picklist cache data
     if (!hasValidFor) {
       const plData = picklistCache[meta.name];
       if (plData) {
-        // UI API returns controllerValues map per field
-        Object.entries(plData).forEach(([rtId, rt]) => {
-          const fieldInfo = rt.rawFieldInfo && rt.rawFieldInfo[dependentName];
-          if (fieldInfo && fieldInfo.controllerValues) {
-            // controllerValues is { "ControllingVal": index }
-            const ctrlValMap = fieldInfo.controllerValues;
-            const valuesArr = fieldInfo.values || [];
-            Object.entries(ctrlValMap).forEach(([ctrlVal, ctrlIdx]) => {
-              if (!matrix[ctrlVal]) matrix[ctrlVal] = [];
-              valuesArr.forEach(v => {
-                if (v.validFor && v.validFor.includes(ctrlIdx)) {
-                  matrix[ctrlVal].push({ label: v.label, value: v.value });
+        // Use first RT that has rawFieldInfo for this dependent field
+        const rtEntry = Object.values(plData).find(rt => rt.rawFieldInfo && rt.rawFieldInfo[dependentName]);
+        if (rtEntry) {
+          const fieldInfo = rtEntry.rawFieldInfo[dependentName];
+          // controllerValues is { "ControllingLabel": controllerIndex }
+          const ctrlValMap = fieldInfo.controllerValues || {};
+          const valuesArr = fieldInfo.values || [];
+
+          // Build reverse map: controllerIndex -> controllerLabel
+          const idxToCtrl = {};
+          Object.entries(ctrlValMap).forEach(([label, idx]) => { idxToCtrl[idx] = label; });
+
+          // For each dependent value, check which controller indices it's valid for
+          valuesArr.forEach(v => {
+            if (v.validFor && Array.isArray(v.validFor)) {
+              v.validFor.forEach(ctrlIdx => {
+                const ctrlLabel = idxToCtrl[ctrlIdx];
+                if (ctrlLabel) {
+                  if (!matrix[ctrlLabel]) matrix[ctrlLabel] = [];
+                  // Avoid duplicates
+                  if (!matrix[ctrlLabel].some(existing => existing.value === v.value)) {
+                    matrix[ctrlLabel].push({ label: v.label, value: v.value });
+                  }
                 }
               });
-            });
-          }
-        });
+            }
+          });
+        }
       }
     }
 
@@ -676,11 +687,12 @@
       h += '<div class="pl-accordion-body">';
 
       // If this is a dependent field, show interactive dependency matrix
-      if (isDep && matrices[field.name]) {
-        const matrix = matrices[field.name];
+      const matrix = isDep ? matrices[field.name] : null;
+      const hasMatrixData = matrix && Object.values(matrix).some(arr => arr.length > 0);
+      if (isDep && hasMatrixData) {
         const ctrlField = meta.fields.find(f => f.name === deps.dependent[field.name]);
         const ctrlLabel = ctrlField ? ctrlField.label : deps.dependent[field.name];
-        const ctrlValues = Object.keys(matrix);
+        const ctrlValues = Object.keys(matrix).filter(k => matrix[k].length > 0);
 
         h += '<div class="pl-dep-matrix" data-dep-field="'+field.name+'">';
         h += '<div class="pl-dep-matrix-label">Select a '+ctrlLabel+' value to filter:</div>';
