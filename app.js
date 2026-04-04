@@ -109,16 +109,25 @@
       try {
         const data = await sfApi('/services/data/'+SF_API_VERSION+'/ui-api/object-info/'+objectApi+'/picklist-values/'+rt.recordTypeId);
         const fields = {};
+        const rawFieldInfo = {};
         if (data.picklistFieldValues) {
           Object.entries(data.picklistFieldValues).forEach(([fieldApi, info]) => {
             fields[fieldApi] = (info.values || []).map(v => ({
               label: v.label,
               value: v.value,
-              isDefault: v.attributes && v.attributes.defaultValue || false
+              isDefault: v.attributes && v.attributes.defaultValue || false,
+              validFor: v.validFor || null
             }));
+            // Store raw dependency info for dependent picklist matrix
+            if (info.controllerValues) {
+              rawFieldInfo[fieldApi] = {
+                controllerValues: info.controllerValues,
+                values: (info.values || []).map(v => ({ label: v.label, value: v.value, validFor: v.validFor || [] }))
+              };
+            }
           });
         }
-        result[rt.recordTypeId] = { name: rt.name, developerName: rt.developerName, fields };
+        result[rt.recordTypeId] = { name: rt.name, developerName: rt.developerName, fields, rawFieldInfo };
       } catch(e) {
         console.warn('Picklist fetch failed for RT', rt.name, e);
       }
@@ -537,8 +546,12 @@
     const matrix = {};
 
     controllerValues.forEach((cv, idx) => { matrix[cv.value] = []; });
+
+    // Method 1: use validFor bitstring from describe API
+    let hasValidFor = false;
     dependentValues.forEach(dv => {
       if (dv.validFor) {
+        hasValidFor = true;
         const validIndices = decodeValidFor(dv.validFor);
         validIndices.forEach(idx => {
           if (idx < controllerValues.length) {
@@ -548,6 +561,31 @@
         });
       }
     });
+
+    // Method 2: if no validFor, use UI API picklist cache data
+    if (!hasValidFor) {
+      const plData = picklistCache[meta.name];
+      if (plData) {
+        // UI API returns controllerValues map per field
+        Object.entries(plData).forEach(([rtId, rt]) => {
+          const fieldInfo = rt.rawFieldInfo && rt.rawFieldInfo[dependentName];
+          if (fieldInfo && fieldInfo.controllerValues) {
+            // controllerValues is { "ControllingVal": index }
+            const ctrlValMap = fieldInfo.controllerValues;
+            const valuesArr = fieldInfo.values || [];
+            Object.entries(ctrlValMap).forEach(([ctrlVal, ctrlIdx]) => {
+              if (!matrix[ctrlVal]) matrix[ctrlVal] = [];
+              valuesArr.forEach(v => {
+                if (v.validFor && v.validFor.includes(ctrlIdx)) {
+                  matrix[ctrlVal].push({ label: v.label, value: v.value });
+                }
+              });
+            });
+          }
+        });
+      }
+    }
+
     return matrix;
   }
 
