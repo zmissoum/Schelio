@@ -446,8 +446,20 @@
     h += sr('Record Types',(meta.recordTypeInfos||[]).filter(r=>r.active).length)+'</div>';
 
     h += '<div class="detail-section"><div class="detail-section-title">Fields ('+fields.length+')</div>';
-    fields.forEach(f=>{h+='<div class="detail-field-row"><div class="detail-field-icon">'+(FIELD_ICONS[f.type]||FIELD_ICONS.default)+'</div><div class="detail-field-name">'+escHtml(f.label)+(f.nillable?'':' *')+'</div><div class="detail-field-api">'+escHtml(f.name)+' '+copyBtn(f.name)+'</div><div class="detail-field-type">'+f.type+'</div></div>';});
+    h += '<div class="detail-field-search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><input type="text" id="overviewFieldSearch" placeholder="Filter fields..." autocomplete="off"/></div>';
+    fields.forEach(f=>{h+='<div class="detail-field-row" data-field-label="'+escHtml(f.label.toLowerCase())+'" data-field-api="'+escHtml(f.name.toLowerCase())+'"><div class="detail-field-icon">'+(FIELD_ICONS[f.type]||FIELD_ICONS.default)+'</div><div class="detail-field-name">'+escHtml(f.label)+(f.nillable?'':' *')+'</div><div class="detail-field-api">'+escHtml(f.name)+' '+copyBtn(f.name)+'</div><div class="detail-field-type">'+f.type+'</div></div>';});
     h += '</div>';
+    // Bind search after render (deferred)
+    setTimeout(()=>{
+      const input=$('#overviewFieldSearch');
+      if(input) input.addEventListener('input',()=>{
+        const q=input.value.toLowerCase().trim();
+        document.querySelectorAll('#dtabOverview .detail-field-row').forEach(row=>{
+          const match=!q||row.dataset.fieldLabel.includes(q)||row.dataset.fieldApi.includes(q);
+          row.classList.toggle('hidden',!match);
+        });
+      });
+    },0);
 
     if(rels.length){
       h+='<div class="detail-section"><div class="detail-section-title">Relationships ('+rels.length+')</div>';
@@ -1503,6 +1515,26 @@ ${objectSections}${erdSummary}
     $('#detailClose').addEventListener('click',()=>detailPanel.classList.remove('visible'));
     $('#btnThemeToggle').addEventListener('click',toggleTheme);
     $('#btnToggleRelations').classList.add('active');
+    // Detail panel resize
+    const detailResizeHandle=$('#detailResize');
+    let isResizingDetail=false;
+    detailResizeHandle.addEventListener('mousedown',e=>{
+      e.preventDefault();isResizingDetail=true;
+      detailResizeHandle.classList.add('dragging');
+      document.body.style.cursor='col-resize';document.body.style.userSelect='none';
+    });
+    document.addEventListener('mousemove',e=>{
+      if(!isResizingDetail)return;
+      const newWidth=window.innerWidth-e.clientX;
+      if(newWidth>=340&&newWidth<=window.innerWidth*0.7){
+        detailPanel.style.width=newWidth+'px';
+        detailPanel.style.right=(-newWidth)+'px';
+        if(detailPanel.classList.contains('visible')) detailPanel.style.right='0';
+      }
+    });
+    document.addEventListener('mouseup',()=>{
+      if(isResizingDetail){isResizingDetail=false;detailResizeHandle.classList.remove('dragging');document.body.style.cursor='';document.body.style.userSelect='';}
+    });
     // Context menu
     erdCanvas.addEventListener('contextmenu',e=>{e.preventDefault();const n=e.target.closest('.erd-node');if(n){showContextMenu(e.clientX,e.clientY,n.dataset.api);}else{hideContextMenu();}});
     document.addEventListener('click',()=>hideContextMenu());

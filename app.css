@@ -463,10 +463,12 @@ html, body {
 /* Detail Panel */
 .detail-panel {
   position: absolute;
-  right: -380px;
+  right: -480px;
   top: 0;
   bottom: 0;
-  width: 380px;
+  width: 480px;
+  min-width: 340px;
+  max-width: 70vw;
   background: var(--bg-base);
   border-left: 1px solid var(--border-subtle);
   z-index: 60;
@@ -476,6 +478,22 @@ html, body {
 }
 
 .detail-panel.visible { right: 0; }
+
+/* Resize handle */
+.detail-resize {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 61;
+}
+.detail-resize:hover,
+.detail-resize.dragging {
+  background: var(--accent-blue);
+  opacity: 0.3;
+}
 
 .detail-header {
   display: flex;
@@ -523,6 +541,33 @@ html, body {
   color: var(--text-faint);
   margin-bottom: 10px;
 }
+
+/* Field search in Overview */
+.detail-field-search {
+  margin-bottom: 8px;
+  position: relative;
+}
+.detail-field-search input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 7px 10px 7px 30px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  outline: none;
+}
+.detail-field-search input:focus { border-color: var(--accent-blue); }
+.detail-field-search input::placeholder { color: var(--text-faint); }
+.detail-field-search svg {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+}
+.detail-field-row.hidden { display: none; }
 
 .detail-field-row {
   display: flex;
