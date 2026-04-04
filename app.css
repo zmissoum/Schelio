@@ -1665,6 +1665,11 @@ html, body {
   border-radius: 6px;
   margin-bottom: 6px;
 }
+.health-warning.critical {
+  color: var(--accent-rose);
+  background: rgba(251,113,133,0.08);
+  border-color: rgba(251,113,133,0.2);
+}
 .health-stats { margin-top: 12px; }
 .health-stat-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .health-stat {

@@ -1392,9 +1392,12 @@ ${objectSections}${erdSummary}
 
     // Warnings
     const warnings=[];
-    if(fieldPct>80) warnings.push('Field count is above 80% of limit ('+fields.length+'/'+MAX_FIELDS+')');
-    if(customPct>80) warnings.push('Custom field count is above 80% of limit ('+customFields.length+'/'+MAX_CUSTOM+')');
-    if(relPct>80) warnings.push('Relationship count is above 80% of limit ('+refs.length+'/'+MAX_RELS+')');
+    if(fieldPct>100) warnings.push('Field count exceeds limit at '+fieldPct+'% ('+fields.length+'/'+MAX_FIELDS+') — over capacity!');
+    else if(fieldPct>80) warnings.push('Field count at '+fieldPct+'% of limit ('+fields.length+'/'+MAX_FIELDS+')');
+    if(customPct>100) warnings.push('Custom field count exceeds limit at '+customPct+'% ('+customFields.length+'/'+MAX_CUSTOM+') — over capacity!');
+    else if(customPct>80) warnings.push('Custom field count at '+customPct+'% of limit ('+customFields.length+'/'+MAX_CUSTOM+')');
+    if(relPct>100) warnings.push('Relationship count exceeds limit at '+relPct+'% ('+refs.length+'/'+MAX_RELS+') — over capacity!');
+    else if(relPct>80) warnings.push('Relationship count at '+relPct+'% of limit ('+refs.length+'/'+MAX_RELS+')');
     if(rts.length>10) warnings.push('High number of Record Types ('+rts.length+') — consider consolidating');
     if(requiredNoDefault.length>20) warnings.push(requiredNoDefault.length+' required fields without defaults — may impact data loading');
     const depFields=fields.filter(f=>f.deprecatedAndHidden);
@@ -1402,7 +1405,7 @@ ${objectSections}${erdSummary}
 
     if(warnings.length){
       h+='<div class="health-warnings"><div class="detail-section-title">Warnings</div>';
-      warnings.forEach(w=>{h+='<div class="health-warning">⚠️ '+w+'</div>';});
+      warnings.forEach(w=>{const isCritical=w.includes('over capacity');h+='<div class="health-warning'+(isCritical?' critical':'')+'">'+( isCritical?'🚨':'⚠️')+' '+w+'</div>';});
       h+='</div>';
     }
 
