@@ -1531,6 +1531,29 @@ html, body {
   margin-top: 2px;
   font-family: var(--font-mono);
 }
+.vr-formula { margin-top: 8px; }
+.vr-formula-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.vr-formula-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-blue);
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.12);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
 
 /* ═══ HEALTH SCORE ═══ */
 .health-score {

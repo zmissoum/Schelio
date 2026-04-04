@@ -1124,7 +1124,15 @@ ${objectSections}${erdSummary}
         "SELECT Id, ValidationName, Active, Description, ErrorDisplayField, ErrorMessage "+
         "FROM ValidationRule WHERE EntityDefinition.QualifiedApiName = '"+escSoql(objectApi)+"' ORDER BY ValidationName"
       );
-      validationRuleCache[objectApi]=data.records||[];
+      const records=data.records||[];
+      // Fetch formula (Metadata) for each VR via individual Tooling API call
+      for(const vr of records){
+        try {
+          const detail=await sfApi('/services/data/'+SF_API_VERSION+'/tooling/sobjects/ValidationRule/'+vr.Id);
+          vr.Formula=detail.Metadata?.errorConditionFormula||detail.FullName||null;
+        } catch(e){ vr.Formula=null; }
+      }
+      validationRuleCache[objectApi]=records;
     } catch(e) {
       console.warn('ValidationRule query failed',e);
       validationRuleCache[objectApi]=[];
@@ -1145,6 +1153,7 @@ ${objectSections}${erdSummary}
       h+='<div class="vr-header"><span class="vr-name">'+escHtml(r.ValidationName)+' '+copyBtn(r.ValidationName)+'</span>';
       h+='<span class="rt-badge '+(r.Active?'active':'inactive')+'">'+(r.Active?'Active':'Inactive')+'</span></div>';
       if(r.Description) h+='<div class="vr-desc">'+escHtml(r.Description)+'</div>';
+      if(r.Formula) h+='<div class="vr-formula"><span class="vr-formula-label">Formula</span><pre class="vr-formula-code">'+escHtml(r.Formula)+'</pre></div>';
       if(r.ErrorMessage) h+='<div class="vr-error">Error: '+escHtml(r.ErrorMessage)+'</div>';
       if(r.ErrorDisplayField) h+='<div class="vr-field">Field: '+escHtml(r.ErrorDisplayField)+'</div>';
       h+='</div>';
