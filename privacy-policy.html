@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schelio — Privacy Policy</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #1E293B; line-height: 1.7; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    h2 { font-size: 18px; margin-top: 32px; margin-bottom: 8px; color: #0F172A; }
+    p, li { font-size: 15px; color: #475569; }
+    .date { font-size: 13px; color: #94A3B8; margin-bottom: 32px; }
+    ul { padding-left: 24px; }
+    a { color: #0284C7; }
+    .highlight { background: #F0F9FF; border-left: 3px solid #0284C7; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
+    .highlight p { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>Schelio — Privacy Policy</h1>
+  <p class="date">Last updated: April 4, 2026</p>
+
+  <div class="highlight">
+    <p><strong>Summary:</strong> Schelio does not collect, store, transmit, or share any user data. Everything stays in your browser.</p>
+  </div>
+
+  <h2>What is Schelio?</h2>
+  <p>Schelio is a Chrome extension that provides an interactive Entity Relationship Diagram (ERD) viewer for Salesforce. It connects to your Salesforce org using your existing browser session to display metadata about your objects, fields, and relationships.</p>
+
+  <h2>Data Collection</h2>
+  <p>Schelio does <strong>not</strong> collect any data. Specifically:</p>
+  <ul>
+    <li>No personal information is collected</li>
+    <li>No usage analytics or telemetry</li>
+    <li>No tracking pixels or third-party scripts</li>
+    <li>No cookies are created by Schelio</li>
+    <li>No data is sent to any external server</li>
+  </ul>
+
+  <h2>Salesforce Session</h2>
+  <p>Schelio reads your Salesforce session cookie (<code>sid</code>) from your browser to authenticate API calls to your Salesforce org. This session token is:</p>
+  <ul>
+    <li>Used only to make API calls directly to <strong>your</strong> Salesforce org</li>
+    <li>Never stored, persisted, or transmitted to any third party</li>
+    <li>Never logged or recorded</li>
+    <li>Discarded when you close the tab</li>
+  </ul>
+
+  <h2>Data Storage</h2>
+  <p>Schelio uses your browser's <code>localStorage</code> to save:</p>
+  <ul>
+    <li>Your ERD layout (object positions, zoom level, selected objects) — per org</li>
+    <li>Your theme preference (dark/light)</li>
+  </ul>
+  <p>This data is stored locally on your machine only. It is never transmitted anywhere. You can clear it at any time via your browser settings.</p>
+
+  <h2>Permissions</h2>
+  <p>Schelio requests the following Chrome permissions:</p>
+  <ul>
+    <li><strong>activeTab</strong> — to detect when you are on a Salesforce page</li>
+    <li><strong>cookies</strong> — to read the Salesforce session cookie for API authentication</li>
+    <li><strong>Host permissions</strong> (*.salesforce.com, *.force.com, *.salesforce-setup.com) — to make REST API calls to your Salesforce org</li>
+  </ul>
+
+  <h2>Third-Party Services</h2>
+  <p>Schelio does not use any third-party services, libraries, or APIs other than the Salesforce REST API (which connects directly to your own org).</p>
+
+  <h2>Open Source</h2>
+  <p>Schelio is open-source under the MIT License. You can review the complete source code at <a href="https://github.com/zmissoum/Schelio">github.com/zmissoum/Schelio</a>.</p>
+
+  <h2>Changes</h2>
+  <p>If this privacy policy changes, the updated version will be posted here with a new "Last updated" date.</p>
+
+  <h2>Contact</h2>
+  <p>For questions about this privacy policy, please open an issue on <a href="https://github.com/zmissoum/Schelio/issues">GitHub</a>.</p>
+</body>
+</html>
