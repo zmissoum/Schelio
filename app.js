@@ -319,7 +319,8 @@
       const icon=FIELD_ICONS[r.field.type]||FIELD_ICONS.default;
       return '<div class="field-result-item" data-obj="'+r.objName+'"><div class="field-result-obj">'+r.objLabel+'</div><div class="field-result-name">'+icon+' '+hl(r.field.label,q)+'</div><div class="field-result-meta">'+hl(r.field.name,q)+' · '+r.field.type+(r.field.referenceTo?' → '+r.field.referenceTo.join(', '):'')+'</div></div>';
     }).join('');
-    if(!results.length) fieldResults.innerHTML='<div class="empty-tab-msg">No fields found. Load more objects first.</div>';
+    if(results.length>50) fieldResults.insertAdjacentHTML('beforeend','<div class="empty-tab-msg" style="color:var(--accent-amber)">Showing 50 of '+results.length+' results — refine your search</div>');
+    if(!results.length) fieldResults.innerHTML='<div class="empty-tab-msg">No fields found across '+Object.keys(objectMeta).length+' loaded objects.<br>Select more objects from the sidebar first.</div>';
     fieldResults.querySelectorAll('.field-result-item').forEach(el=>el.addEventListener('click',()=>{
       const obj=el.dataset.obj; if(!selectedObjects.has(obj)) toggleObject(obj); showDetail(obj);
     }));
@@ -1024,8 +1025,8 @@
     }
 
     const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Technical Spec — ${orgName}</title>
-<style>@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=DM+Sans:opsz@9..40;wght@400;500;600;700&display=swap');
-@page{margin:20mm 18mm;size:A4}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'DM Sans',system-ui,sans-serif;font-size:11px;color:#1E293B;line-height:1.5;background:#fff}.mono{font-family:'JetBrains Mono',monospace;font-size:10px}
+<style>/* System font stacks — no external dependencies */
+@page{margin:20mm 18mm;size:A4}*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:11px;color:#1E293B;line-height:1.5;background:#fff}.mono{font-family:'Cascadia Code','Fira Code',Consolas,'SF Mono',monospace;font-size:10px}
 .cover{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:60px 40px;background:linear-gradient(160deg,#0B1121,#162032);color:#E2E8F0;page-break-after:always}
 .cover h1{font-size:32px;font-weight:700;margin-bottom:12px}.cover .subtitle{font-size:16px;color:#94A3B8;margin-bottom:40px}.cover .meta-line{font-family:'JetBrains Mono',monospace;font-size:12px;color:#64748B;margin:4px 0}
 .toc{page-break-after:always;padding:40px}.toc h2{font-size:20px;margin-bottom:20px;color:#0F172A;border-bottom:2px solid #38BDF8;padding-bottom:8px}
@@ -1173,7 +1174,8 @@ ${objectSections}${erdSummary}
   function applyTransform(){const t='translate('+panX+','+panY+') scale('+zoom+')';erdNodes.setAttribute('transform',t);erdRels.setAttribute('transform',t);zoomLabel.textContent=Math.round(zoom*100)+'%';}
   function setZoom(nz,cx,cy){const oz=zoom;zoom=Math.max(0.1,Math.min(3,nz));if(cx!==undefined){panX=cx-(cx-panX)*(zoom/oz);panY=cy-(cy-panY)*(zoom/oz);}applyTransform();}
   function onNodeMouseDown(e){if(e.button!==0)return;e.stopPropagation();const n=e.currentTarget,a=n.dataset.api,p=nodePositions[a];if(!p)return;pushUndo();const pt=svgPoint(e);dragNode=a;dragOffset.x=pt.x-p.x;dragOffset.y=pt.y-p.y;erdCanvas.style.cursor='grabbing';}
-  function onCanvasMouseMove(e){if(dragNode){const pt=svgPoint(e);nodePositions[dragNode]={x:pt.x-dragOffset.x,y:pt.y-dragOffset.y};renderERD();}else if(isPanning){panX+=e.clientX-panStart.x;panY+=e.clientY-panStart.y;panStart.x=e.clientX;panStart.y=e.clientY;applyTransform();}}
+  let rafPending=false;
+  function onCanvasMouseMove(e){if(dragNode){const pt=svgPoint(e);nodePositions[dragNode]={x:pt.x-dragOffset.x,y:pt.y-dragOffset.y};if(!rafPending){rafPending=true;requestAnimationFrame(()=>{renderERD();rafPending=false;});}}else if(isPanning){panX+=e.clientX-panStart.x;panY+=e.clientY-panStart.y;panStart.x=e.clientX;panStart.y=e.clientY;applyTransform();}}
   function onCanvasMouseUp(){dragNode=null;isPanning=false;erdCanvas.style.cursor='grab';}
   function svgPoint(e){const r=erdCanvas.getBoundingClientRect();return{x:(e.clientX-r.left-panX)/zoom,y:(e.clientY-r.top-panY)/zoom};}
   function autoLayout(){
@@ -1676,11 +1678,12 @@ ${objectSections}${erdSummary}
     document.addEventListener('click',e=>{const cb=e.target.closest('.copy-btn');if(cb){e.stopPropagation();copyToClipboard(cb.dataset.copy);}});
     loadTheme();
     document.addEventListener('keydown',e=>{
+      const mod=e.ctrlKey||e.metaKey;
       if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');hideContextMenu();}
-      if(e.ctrlKey&&e.key==='='){e.preventDefault();setZoom(zoom*1.2);}if(e.ctrlKey&&e.key==='-'){e.preventDefault();setZoom(zoom/1.2);}
-      if(e.ctrlKey&&e.key==='0'){e.preventDefault();fitAll();}if(e.ctrlKey&&e.key==='s'){e.preventDefault();saveLayout();}
-      if(e.ctrlKey&&e.key==='z'){e.preventDefault();undo();}if(e.ctrlKey&&e.key==='y'){e.preventDefault();redo();}
-      if(e.ctrlKey&&e.key==='f'){e.preventDefault();const tabs=document.querySelectorAll('.sidebar-tab');if(tabs[1])tabs[1].click();fieldSearchInput.focus();}
+      if(mod&&e.key==='='){e.preventDefault();setZoom(zoom*1.2);}if(mod&&e.key==='-'){e.preventDefault();setZoom(zoom/1.2);}
+      if(mod&&e.key==='0'){e.preventDefault();fitAll();}if(mod&&e.key==='s'){e.preventDefault();saveLayout();}
+      if(mod&&e.key==='z'){e.preventDefault();undo();}if(mod&&e.key==='y'){e.preventDefault();redo();}
+      if(mod&&e.key==='f'){e.preventDefault();const tabs=document.querySelectorAll('.sidebar-tab');if(tabs[1])tabs[1].click();fieldSearchInput.focus();}
     });
   }
 

@@ -1779,6 +1779,13 @@ body.light-theme .theme-icon-light { display: block; }
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: thin;
+  position: relative;
+  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+.detail-tabs.scrolled-end {
+  -webkit-mask-image: linear-gradient(to left, black 85%, transparent 100%);
+  mask-image: linear-gradient(to left, black 85%, transparent 100%);
 }
 .detail-tabs::-webkit-scrollbar { height: 3px; }
 .detail-tabs::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; }
@@ -1812,3 +1819,20 @@ body.light-theme .field-type { fill: #94A3B8; }
 body.light-theme .grid-bg { fill: none; }
 body.light-theme .rel-label { fill: #475569; }
 body.light-theme .theme-toggle { background: #FFFFFF; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+/* Light theme: modals, tooltips, shadows */
+body.light-theme .modal-overlay { background: rgba(0,0,0,0.25); }
+body.light-theme .modal { background: #FFFFFF; border-color: #E2E8F0; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+body.light-theme .modal-header { border-color: #E2E8F0; }
+body.light-theme .modal-footer { border-color: #E2E8F0; }
+body.light-theme .modal pre { background: #F8FAFC; color: #334155; border-color: #E2E8F0; }
+body.light-theme .toast { box-shadow: 0 8px 30px rgba(0,0,0,0.1); }
+body.light-theme .rel-tooltip { background: #FFFFFF; border-color: #E2E8F0; box-shadow: 0 8px 30px rgba(0,0,0,0.1); }
+body.light-theme .context-menu { background: #FFFFFF; border-color: #E2E8F0; box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
+body.light-theme .ctx-item:hover { background: #F1F5F9; }
+body.light-theme .detail-panel { box-shadow: -4px 0 20px rgba(0,0,0,0.08); }
+body.light-theme .sidebar { box-shadow: 4px 0 20px rgba(0,0,0,0.05); }
+body.light-theme .card-header-bg { opacity: 0.85; }
+body.light-theme .loading-overlay { background: #FFFFFF; }
+body.light-theme .loading-title { color: #0F172A; }
+body.light-theme .loading-status { color: #475569; }
