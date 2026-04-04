@@ -132,6 +132,14 @@
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M5 7h8M5 10h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           <span>Mermaid</span>
         </button>
+        <button class="tool-btn" id="btnExportPlantUml" title="Export PlantUML">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M5 6h8M5 9h6M5 12h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <span>UML</span>
+        </button>
+        <button class="tool-btn" id="btnExportCsv" title="Export CSV field inventory">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12v2a2 2 0 002 2h8a2 2 0 002-2v-2M9 2v10M5 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>CSV</span>
+        </button>
         <div class="toolbar-sep"></div>
         <button class="tool-btn tool-btn-accent" id="btnExportPdf" title="Export PDF Technical Spec">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 1h7l4 4v10a2 2 0 01-2 2H4a2 2 0 01-2-2V3a2 2 0 012-2z" stroke="currentColor" stroke-width="1.3"/><path d="M11 1v4h4M6 9h6M6 12h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -181,6 +189,9 @@
         <button class="detail-tab" data-dtab="picklists">Picklists</button>
         <button class="detail-tab" data-dtab="layouts">Layouts</button>
         <button class="detail-tab" data-dtab="profiles">Profiles</button>
+        <button class="detail-tab" data-dtab="validations">Rules</button>
+        <button class="detail-tab" data-dtab="automation">Automation</button>
+        <button class="detail-tab" data-dtab="health">Health</button>
       </div>
       <div class="detail-body" id="detailBody">
         <div class="detail-tab-panel active" id="dtabOverview"></div>
@@ -188,6 +199,9 @@
         <div class="detail-tab-panel" id="dtabPicklists"></div>
         <div class="detail-tab-panel" id="dtabLayouts"></div>
         <div class="detail-tab-panel" id="dtabProfiles"></div>
+        <div class="detail-tab-panel" id="dtabValidations"></div>
+        <div class="detail-tab-panel" id="dtabAutomation"></div>
+        <div class="detail-tab-panel" id="dtabHealth"></div>
       </div>
       <div class="detail-loading hidden" id="detailLoading">
         <div class="detail-spinner"></div>
@@ -227,6 +241,39 @@
       </div>
     </div>
   </div>
+
+  <!-- Context Menu -->
+  <div class="context-menu" id="contextMenu">
+    <button class="ctx-item" data-action="details">Details</button>
+    <button class="ctx-item" data-action="remove">Remove</button>
+    <button class="ctx-item" data-action="copy-api">Copy API Name</button>
+    <button class="ctx-item" data-action="export-single">Export as Mermaid</button>
+  </div>
+
+  <!-- PlantUML Modal -->
+  <div class="modal-overlay" id="plantumlModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>PlantUML Export</h3>
+        <button class="detail-close" id="plantumlModalClose">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <pre id="plantumlCode"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-secondary" id="plantumlModalCancel">Close</button>
+        <button class="modal-btn modal-btn-primary" id="plantumlCopy">Copy to clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Theme Toggle -->
+  <button class="theme-toggle" id="btnThemeToggle" title="Toggle light/dark theme">
+    <svg class="theme-icon-dark" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 1v1M9 16v1M1 9h1M16 9h1M3.6 3.6l.7.7M13.7 13.7l.7.7M3.6 14.4l.7-.7M13.7 4.3l.7-.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="9" cy="9" r="3.5" stroke="currentColor" stroke-width="1.3"/></svg>
+    <svg class="theme-icon-light" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M15 10.5A6.5 6.5 0 017.5 3 7 7 0 1015 10.5z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+  </button>
 
   <!-- Toast -->
   <div class="toast" id="toast">

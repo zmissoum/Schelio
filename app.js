@@ -15,6 +15,7 @@
 
   let instanceUrl='', sessionId='', allObjects=[], selectedObjects=new Set(), objectMeta={}, nodePositions={}, relationships=[];
   let zoom=1, panX=0, panY=0, isPanning=false, panStart={x:0,y:0}, dragNode=null, dragOffset={x:0,y:0}, showRelations=true, activeFilter='all';
+  let undoStack=[], redoStack=[], contextTarget=null, isDarkTheme=true;
 
   // Extended metadata caches
   let activeDetailObject = null;  // guard against async race conditions in detail panel
@@ -23,6 +24,9 @@
   let flexiPageCache = {};       // objectApi -> [flexiPages]
   let profileCache = {};         // objectApi -> { objectPerms: [], fieldPerms: [] }
   let layoutAssignCache = {};    // objectApi -> [{ profile, recordType, layout }]
+  let validationRuleCache = {};  // objectApi -> [rules]
+  let automationCache = {};      // objectApi -> { flows, triggers }
+  let permSetCache = {};         // objectApi -> { objectPerms, fieldPerms }
 
   const $ = s => document.querySelector(s);
   function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
@@ -270,7 +274,15 @@
       const badge=o.custom?'<span class="obj-badge custom">Custom</span>':'<span class="obj-badge standard">Std</span>';
       return '<div class="obj-item'+sel+'" data-api="'+o.name+'"><div class="obj-check"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="obj-info"><div class="obj-label">'+o.label+'</div><div class="obj-api">'+o.name+'</div></div>'+badge+'</div>';
     }).join('');
-    objectList.querySelectorAll('.obj-item').forEach(el=>el.addEventListener('click',()=>toggleObject(el.dataset.api)));
+    const items=objectList.querySelectorAll('.obj-item');
+    let lastClickedIdx=-1;
+    items.forEach((el,idx)=>el.addEventListener('click',(e)=>{
+      if(e.shiftKey&&lastClickedIdx>=0){
+        const start=Math.min(lastClickedIdx,idx),end=Math.max(lastClickedIdx,idx);
+        for(let i=start;i<=end;i++){const api=items[i].dataset.api;if(!selectedObjects.has(api))toggleObject(api);}
+      } else { toggleObject(el.dataset.api); }
+      lastClickedIdx=idx;
+    }));
   }
 
   async function toggleObject(api) {
@@ -377,6 +389,15 @@
     // ── TAB 5: Profiles (async) ──
     $('#dtabProfiles').innerHTML = '<div class="detail-loading"><div class="detail-spinner"></div><span>Loading profile permissions…</span></div>';
 
+    // ── TAB 6: Validation Rules (async) ──
+    $('#dtabValidations').innerHTML = '<div class="detail-loading"><div class="detail-spinner"></div><span>Loading validation rules…</span></div>';
+
+    // ── TAB 7: Automation (async) ──
+    $('#dtabAutomation').innerHTML = '<div class="detail-loading"><div class="detail-spinner"></div><span>Loading automation…</span></div>';
+
+    // ── TAB 8: Health (sync) ──
+    renderHealthTab(meta);
+
     // Fetch async data in background
     // Guard: skip rendering if user switched to another object while loading
     fetchPicklistsByRT(apiName).then(data => {
@@ -394,9 +415,24 @@
     fetchProfilePermissions(apiName).then(profData => {
       return fetchLayoutAssignments(apiName).then(() => profData);
     }).then(profData => {
-      if (activeDetailObject === apiName) renderProfilesTab(meta, profData);
+      if (activeDetailObject === apiName) {
+        renderProfilesTab(meta, profData);
+        renderPermSetsInProfilesTab(apiName, $('#dtabProfiles'));
+      }
     }).catch(e => {
       if (activeDetailObject === apiName) $('#dtabProfiles').innerHTML = '<div class="empty-tab-msg">Could not load profile permissions.<br>'+escHtml(e.message)+'</div>';
+    });
+
+    fetchValidationRules(apiName).then(rules => {
+      if (activeDetailObject === apiName) renderValidationsTab(meta, rules);
+    }).catch(e => {
+      if (activeDetailObject === apiName) $('#dtabValidations').innerHTML = '<div class="empty-tab-msg">Could not load validation rules.<br>'+escHtml(e.message)+'</div>';
+    });
+
+    fetchAutomation(apiName).then(data => {
+      if (activeDetailObject === apiName) renderAutomationTab(meta, data);
+    }).catch(e => {
+      if (activeDetailObject === apiName) $('#dtabAutomation').innerHTML = '<div class="empty-tab-msg">Could not load automation.<br>'+escHtml(e.message)+'</div>';
     });
   }
 
@@ -404,12 +440,13 @@
     const fields = meta.fields.filter(f=>!f.deprecatedAndHidden).sort((a,b)=>a.label.localeCompare(b.label));
     const rels = meta.fields.filter(f=>f.type==='reference');
     let h = '<div class="detail-section"><div class="detail-section-title">Overview</div>';
-    h += sr('API Name',meta.name)+sr('Label',meta.label)+sr('Fields',meta.fields.length)+sr('Custom',meta.custom?'Yes':'No');
-    h += sr('Record Types',(meta.recordTypeInfos||[]).filter(r=>r.active).length);
-    h += sr('Key Prefix',meta.keyPrefix||'—')+'</div>';
+    h += '<div class="detail-stat"><span class="detail-stat-label">API Name</span><span class="detail-stat-value">'+escHtml(meta.name)+' '+copyBtn(meta.name)+'</span></div>';
+    h += '<div class="detail-stat"><span class="detail-stat-label">Key Prefix</span><span class="detail-stat-value">'+(meta.keyPrefix||'—')+' '+(meta.keyPrefix?copyBtn(meta.keyPrefix):'')+'</span></div>';
+    h += sr('Label',meta.label)+sr('Fields',meta.fields.length)+sr('Custom',meta.custom?'Yes':'No');
+    h += sr('Record Types',(meta.recordTypeInfos||[]).filter(r=>r.active).length)+'</div>';
 
     h += '<div class="detail-section"><div class="detail-section-title">Fields ('+fields.length+')</div>';
-    fields.forEach(f=>{h+='<div class="detail-field-row"><div class="detail-field-icon">'+(FIELD_ICONS[f.type]||FIELD_ICONS.default)+'</div><div class="detail-field-name">'+f.label+(f.nillable?'':' *')+'</div><div class="detail-field-type">'+f.type+'</div></div>';});
+    fields.forEach(f=>{h+='<div class="detail-field-row"><div class="detail-field-icon">'+(FIELD_ICONS[f.type]||FIELD_ICONS.default)+'</div><div class="detail-field-name">'+escHtml(f.label)+(f.nillable?'':' *')+'</div><div class="detail-field-api">'+escHtml(f.name)+' '+copyBtn(f.name)+'</div><div class="detail-field-type">'+f.type+'</div></div>';});
     h += '</div>';
 
     if(rels.length){
@@ -853,7 +890,9 @@
     });
   }
 
-  function sr(l,v){return '<div class="detail-stat"><span class="detail-stat-label">'+l+'</span><span class="detail-stat-value">'+v+'</span></div>';}
+  function sr(l,v){return '<div class="detail-stat"><span class="detail-stat-label">'+l+'</span><span class="detail-stat-value">'+escHtml(String(v))+'</span></div>';}
+  function copyBtn(text){return '<button class="copy-btn" data-copy="'+escHtml(text)+'" title="Copy">📋</button>';}
+  function copyToClipboard(text){navigator.clipboard.writeText(text).then(()=>showToast('Copied!','📋')).catch(()=>showToast('Copy failed','⚠️'));}
 
   // ═══ PDF SPEC (updated with RT + picklists) ═══
   function exportPdfSpec() {
@@ -989,7 +1028,9 @@ ${objectSections}${erdSummary}
         el=svgEl('text',{class:'field-type',x:CARD_WIDTH-12,y:fy+15,'text-anchor':'end'});el.textContent=field.type;g.appendChild(el);
       });
       if(meta.fields.length>MAX_FIELDS_SHOWN){const my=CARD_HEADER_H+CARD_PADDING+fields.length*FIELD_ROW_H+6;const el=svgEl('text',{x:CARD_WIDTH/2,y:my+8,'text-anchor':'middle','font-size':'10',fill:'#64748B','font-family':"'JetBrains Mono',monospace"});el.textContent='+ '+(meta.fields.length-MAX_FIELDS_SHOWN)+' more';g.appendChild(el);}
-      g.dataset.height=cardH;g.addEventListener('mousedown',onNodeMouseDown);g.addEventListener('dblclick',()=>showDetail(api));erdNodes.appendChild(g);
+      // Tooltip
+      const tip=svgEl('title',{});tip.textContent=meta.label+' — Double-click for details, right-click for menu';g.appendChild(tip);
+      g.dataset.height=cardH;g.style.cursor='pointer';g.addEventListener('mousedown',onNodeMouseDown);g.addEventListener('dblclick',()=>showDetail(api));erdNodes.appendChild(g);
     });
   }
 
@@ -1017,7 +1058,7 @@ ${objectSections}${erdSummary}
   // ═══ PAN & ZOOM ═══
   function applyTransform(){const t='translate('+panX+','+panY+') scale('+zoom+')';erdNodes.setAttribute('transform',t);erdRels.setAttribute('transform',t);zoomLabel.textContent=Math.round(zoom*100)+'%';}
   function setZoom(nz,cx,cy){const oz=zoom;zoom=Math.max(0.1,Math.min(3,nz));if(cx!==undefined){panX=cx-(cx-panX)*(zoom/oz);panY=cy-(cy-panY)*(zoom/oz);}applyTransform();}
-  function onNodeMouseDown(e){if(e.button!==0)return;e.stopPropagation();const n=e.currentTarget,a=n.dataset.api,p=nodePositions[a];if(!p)return;const pt=svgPoint(e);dragNode=a;dragOffset.x=pt.x-p.x;dragOffset.y=pt.y-p.y;erdCanvas.style.cursor='grabbing';}
+  function onNodeMouseDown(e){if(e.button!==0)return;e.stopPropagation();const n=e.currentTarget,a=n.dataset.api,p=nodePositions[a];if(!p)return;pushUndo();const pt=svgPoint(e);dragNode=a;dragOffset.x=pt.x-p.x;dragOffset.y=pt.y-p.y;erdCanvas.style.cursor='grabbing';}
   function onCanvasMouseMove(e){if(dragNode){const pt=svgPoint(e);nodePositions[dragNode]={x:pt.x-dragOffset.x,y:pt.y-dragOffset.y};renderERD();}else if(isPanning){panX+=e.clientX-panStart.x;panY+=e.clientY-panStart.y;panStart.x=e.clientX;panStart.y=e.clientY;applyTransform();}}
   function onCanvasMouseUp(){dragNode=null;isPanning=false;erdCanvas.style.cursor='grab';}
   function svgPoint(e){const r=erdCanvas.getBoundingClientRect();return{x:(e.clientX-r.left-panX)/zoom,y:(e.clientY-r.top-panY)/zoom};}
@@ -1026,6 +1067,317 @@ ${objectSections}${erdSummary}
 
   function exportPng(){const b=new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'});const u=URL.createObjectURL(b);const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=erdCanvas.clientWidth*2;c.height=erdCanvas.clientHeight*2;const ctx=c.getContext('2d');ctx.fillStyle='#060D1B';ctx.fillRect(0,0,c.width,c.height);ctx.scale(2,2);ctx.drawImage(img,0,0);URL.revokeObjectURL(u);c.toBlob(bl=>{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download='schelio-erd.png';a.click();});};img.src=u;}
   function exportSvg(){const a=document.createElement('a');const url=URL.createObjectURL(new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'}));a.href=url;a.download='schelio-erd.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+
+  // ═══ CSV EXPORT ═══
+  function exportCsv() {
+    const selected=[...selectedObjects];
+    if(!selected.length){showToast('Select objects first','⚠️');return;}
+    let csv='Object,Field Label,Field API Name,Type,Length,Required,Custom,Reference To\n';
+    selected.forEach(api=>{
+      const meta=objectMeta[api];if(!meta)return;
+      meta.fields.filter(f=>!f.deprecatedAndHidden).sort((a,b)=>a.label.localeCompare(b.label)).forEach(f=>{
+        const ref=(f.referenceTo||[]).join('; ');
+        csv+='"'+meta.label+'","'+f.label+'","'+f.name+'","'+f.type+'",'+(f.length||f.precision||'')+','+(f.nillable?'':'Yes')+','+(f.custom?'Yes':'')+','+(ref?'"'+ref+"'":'')+'\n';
+      });
+    });
+    const a=document.createElement('a');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.href=url;a.download='schelio-fields.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    showToast('CSV exported!','📊');
+  }
+
+  // ═══ PLANTUML EXPORT ═══
+  function generatePlantUml() {
+    let uml='@startuml\n!theme plain\nskinparam linetype ortho\n\n';
+    selectedObjects.forEach(api=>{
+      const meta=objectMeta[api];if(!meta)return;
+      const safe=api.replace(/[^a-zA-Z0-9_]/g,'_');
+      uml+='entity "'+meta.label+'" as '+safe+' {\n';
+      const fields=meta.fields.filter(f=>!f.deprecatedAndHidden).sort((a,b)=>{if(a.name==='Id')return-1;if(b.name==='Id')return 1;return a.label.localeCompare(b.label);});
+      const pkFields=fields.filter(f=>f.name==='Id');
+      const fkFields=fields.filter(f=>f.type==='reference');
+      const otherFields=fields.filter(f=>f.name!=='Id'&&f.type!=='reference');
+      pkFields.forEach(f=>{uml+='  * '+f.name+' : '+f.type+' <<PK>>\n';});
+      uml+='  --\n';
+      fkFields.forEach(f=>{uml+='  * '+f.name+' : '+f.type+' <<FK>>\n';});
+      if(fkFields.length&&otherFields.length) uml+='  --\n';
+      otherFields.slice(0,20).forEach(f=>{uml+='  '+f.name+' : '+f.type+(f.nillable?'':' {required}')+'\n';});
+      if(otherFields.length>20) uml+='  .. +'+(otherFields.length-20)+' more ..\n';
+      uml+='}\n\n';
+    });
+    relationships.forEach(r=>{
+      const fr=r.from.replace(/[^a-zA-Z0-9_]/g,'_');
+      const to=r.to.replace(/[^a-zA-Z0-9_]/g,'_');
+      uml+=to+(r.type==='master-detail'?' ||--o{ ':' }o--|| ')+fr+' : "'+r.field+'"\n';
+    });
+    uml+='\n@enduml';
+    return uml;
+  }
+  function showPlantUmlModal(){$('#plantumlCode').textContent=generatePlantUml();$('#plantumlModal').classList.add('visible');}
+  function copyPlantUml(){navigator.clipboard.writeText($('#plantumlCode').textContent).then(()=>showToast('Copied!','📋')).catch(()=>showToast('Copy failed','⚠️'));}
+
+  // ═══ VALIDATION RULES (Tooling API) ═══
+  async function fetchValidationRules(objectApi) {
+    if(validationRuleCache[objectApi]) return validationRuleCache[objectApi];
+    try {
+      const data=await sfToolingQuery(
+        "SELECT Id, ValidationName, Active, Description, ErrorDisplayField, ErrorMessage "+
+        "FROM ValidationRule WHERE EntityDefinition.QualifiedApiName = '"+escSoql(objectApi)+"' ORDER BY ValidationName"
+      );
+      validationRuleCache[objectApi]=data.records||[];
+    } catch(e) {
+      console.warn('ValidationRule query failed',e);
+      validationRuleCache[objectApi]=[];
+    }
+    return validationRuleCache[objectApi];
+  }
+
+  function renderValidationsTab(meta, rules) {
+    if(!rules.length){
+      $('#dtabValidations').innerHTML='<div class="empty-tab-msg">No validation rules found for this object.</div>';
+      return;
+    }
+    const active=rules.filter(r=>r.Active), inactive=rules.filter(r=>!r.Active);
+    let h='<div class="detail-section"><div class="detail-section-title">Validation Rules ('+rules.length+')</div>';
+    h+='<div class="health-stat-row"><span class="health-stat good">'+active.length+' active</span><span class="health-stat neutral">'+inactive.length+' inactive</span></div>';
+    rules.forEach(r=>{
+      h+='<div class="vr-card'+(r.Active?'':' vr-inactive')+'">';
+      h+='<div class="vr-header"><span class="vr-name">'+escHtml(r.ValidationName)+' '+copyBtn(r.ValidationName)+'</span>';
+      h+='<span class="rt-badge '+(r.Active?'active':'inactive')+'">'+(r.Active?'Active':'Inactive')+'</span></div>';
+      if(r.Description) h+='<div class="vr-desc">'+escHtml(r.Description)+'</div>';
+      if(r.ErrorMessage) h+='<div class="vr-error">Error: '+escHtml(r.ErrorMessage)+'</div>';
+      if(r.ErrorDisplayField) h+='<div class="vr-field">Field: '+escHtml(r.ErrorDisplayField)+'</div>';
+      h+='</div>';
+    });
+    h+='</div>';
+    $('#dtabValidations').innerHTML=h;
+    $('#dtabValidations').querySelectorAll('.copy-btn').forEach(b=>b.addEventListener('click',()=>copyToClipboard(b.dataset.copy)));
+  }
+
+  // ═══ FLOWS & TRIGGERS (Tooling API) ═══
+  async function fetchAutomation(objectApi) {
+    if(automationCache[objectApi]) return automationCache[objectApi];
+    const result={flows:[],triggers:[]};
+    try {
+      const flowData=await sfToolingQuery(
+        "SELECT Id, DeveloperName, MasterLabel, ProcessType, TriggerType, TriggerObjectOrEventLabel "+
+        "FROM FlowDefinition WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"'"
+      );
+      result.flows=flowData.records||[];
+    } catch(e) { console.warn('FlowDefinition query failed',e); }
+    try {
+      const trigData=await sfToolingQuery(
+        "SELECT Id, Name, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, "+
+        "UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status "+
+        "FROM ApexTrigger WHERE TableEnumOrId = '"+escSoql(objectApi)+"'"
+      );
+      result.triggers=trigData.records||[];
+    } catch(e) { console.warn('ApexTrigger query failed',e); }
+    automationCache[objectApi]=result;
+    return result;
+  }
+
+  function renderAutomationTab(meta, data) {
+    let h='';
+    // Flows
+    h+='<div class="detail-section"><div class="detail-section-title">Flows ('+data.flows.length+')</div>';
+    if(data.flows.length){
+      data.flows.forEach(f=>{
+        h+='<div class="layout-card"><div class="layout-card-header">';
+        h+='<span class="layout-card-icon">⚡</span>';
+        h+='<div class="layout-card-info"><div class="layout-card-name">'+escHtml(f.MasterLabel||f.DeveloperName)+'</div>';
+        h+='<div class="layout-card-type">'+(f.ProcessType||'Flow')+' · '+(f.TriggerType||'—')+'</div></div></div></div>';
+      });
+    } else { h+='<div class="empty-tab-msg">No record-triggered flows found.</div>'; }
+    h+='</div>';
+    // Triggers
+    h+='<div class="detail-section"><div class="detail-section-title">Apex Triggers ('+data.triggers.length+')</div>';
+    if(data.triggers.length){
+      data.triggers.forEach(t=>{
+        const events=[];
+        if(t.UsageBeforeInsert) events.push('Before Insert');
+        if(t.UsageAfterInsert) events.push('After Insert');
+        if(t.UsageBeforeUpdate) events.push('Before Update');
+        if(t.UsageAfterUpdate) events.push('After Update');
+        if(t.UsageBeforeDelete) events.push('Before Delete');
+        if(t.UsageAfterDelete) events.push('After Delete');
+        if(t.UsageAfterUndelete) events.push('After Undelete');
+        h+='<div class="layout-card"><div class="layout-card-header">';
+        h+='<span class="layout-card-icon">🔧</span>';
+        h+='<div class="layout-card-info"><div class="layout-card-name">'+escHtml(t.Name)+' '+copyBtn(t.Name)+'</div>';
+        h+='<div class="layout-card-type">'+events.join(' · ')+'</div></div>';
+        h+='<span class="rt-badge '+(t.Status==='Active'?'active':'inactive')+'">'+escHtml(t.Status||'Active')+'</span>';
+        h+='</div></div>';
+      });
+    } else { h+='<div class="empty-tab-msg">No Apex triggers found.</div>'; }
+    h+='</div>';
+    $('#dtabAutomation').innerHTML=h;
+    $('#dtabAutomation').querySelectorAll('.copy-btn').forEach(b=>b.addEventListener('click',()=>copyToClipboard(b.dataset.copy)));
+  }
+
+  // ═══ SCHEMA HEALTH SCORE ═══
+  function renderHealthTab(meta) {
+    const fields=meta.fields.filter(f=>!f.deprecatedAndHidden);
+    const customFields=fields.filter(f=>f.custom);
+    const refs=fields.filter(f=>f.type==='reference');
+    const picklists=fields.filter(f=>f.type==='picklist'||f.type==='multipicklist');
+    const rts=(meta.recordTypeInfos||[]).filter(r=>!r.master&&r.active);
+
+    const MAX_FIELDS=800, MAX_CUSTOM=500, MAX_RELS=40;
+    const fieldPct=Math.round(fields.length/MAX_FIELDS*100);
+    const customPct=Math.round(customFields.length/MAX_CUSTOM*100);
+    const relPct=Math.round(refs.length/MAX_RELS*100);
+
+    // Score: 100 - penalties
+    let score=100;
+    if(fieldPct>80) score-=20; else if(fieldPct>60) score-=10;
+    if(customPct>80) score-=15; else if(customPct>60) score-=8;
+    if(relPct>80) score-=15; else if(relPct>60) score-=8;
+    if(rts.length>10) score-=10; else if(rts.length>5) score-=5;
+    const requiredNoDefault=fields.filter(f=>!f.nillable&&!f.defaultValue&&f.name!=='Id');
+    if(requiredNoDefault.length>20) score-=10;
+    score=Math.max(0,Math.min(100,score));
+
+    const scoreClass=score>=80?'good':score>=50?'warn':'bad';
+    let h='<div class="detail-section"><div class="detail-section-title">Schema Health</div>';
+    h+='<div class="health-score '+scoreClass+'"><span class="health-score-num">'+score+'</span><span class="health-score-label">/100</span></div>';
+
+    // Limits bars
+    h+='<div class="health-limits">';
+    h+=healthBar('Total Fields',fields.length,MAX_FIELDS);
+    h+=healthBar('Custom Fields',customFields.length,MAX_CUSTOM);
+    h+=healthBar('Relationships',refs.length,MAX_RELS);
+    h+='</div>';
+
+    // Warnings
+    const warnings=[];
+    if(fieldPct>80) warnings.push('Field count is above 80% of limit ('+fields.length+'/'+MAX_FIELDS+')');
+    if(customPct>80) warnings.push('Custom field count is above 80% of limit ('+customFields.length+'/'+MAX_CUSTOM+')');
+    if(relPct>80) warnings.push('Relationship count is above 80% of limit ('+refs.length+'/'+MAX_RELS+')');
+    if(rts.length>10) warnings.push('High number of Record Types ('+rts.length+') — consider consolidating');
+    if(requiredNoDefault.length>20) warnings.push(requiredNoDefault.length+' required fields without defaults — may impact data loading');
+    const depFields=fields.filter(f=>f.deprecatedAndHidden);
+    if(depFields.length) warnings.push(depFields.length+' deprecated/hidden fields found');
+
+    if(warnings.length){
+      h+='<div class="health-warnings"><div class="detail-section-title">Warnings</div>';
+      warnings.forEach(w=>{h+='<div class="health-warning">⚠️ '+w+'</div>';});
+      h+='</div>';
+    }
+
+    // Stats summary
+    h+='<div class="health-stats">';
+    h+='<div class="health-stat-row"><span class="health-stat neutral">📋 '+picklists.length+' picklists</span>';
+    h+='<span class="health-stat neutral">🔗 '+refs.length+' relationships</span>';
+    h+='<span class="health-stat neutral">📝 '+customFields.length+' custom</span></div>';
+    h+='</div></div>';
+
+    $('#dtabHealth').innerHTML=h;
+  }
+  function healthBar(label,val,max){
+    const pct=Math.round(val/max*100);
+    const cls=pct>80?'bad':pct>60?'warn':'good';
+    return '<div class="health-bar-row"><span class="health-bar-label">'+label+'</span><div class="health-bar"><div class="health-bar-fill '+cls+'" style="width:'+Math.min(pct,100)+'%"></div></div><span class="health-bar-val">'+val+'/'+max+'</span></div>';
+  }
+
+  // ═══ PERMISSION SETS ═══
+  async function fetchPermSetPermissions(objectApi) {
+    if(permSetCache[objectApi]) return permSetCache[objectApi];
+    const result={objectPerms:[],fieldPerms:[],permSets:{}};
+    try {
+      const objData=await sfApi(
+        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
+          "SELECT Id, ParentId, Parent.Label, Parent.IsOwnedByProfile, SobjectType, "+
+          "PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, "+
+          "PermissionsViewAllRecords, PermissionsModifyAllRecords "+
+          "FROM ObjectPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
+          "AND Parent.IsOwnedByProfile = false ORDER BY Parent.Label"
+        )
+      );
+      result.objectPerms=objData.records||[];
+    } catch(e){ console.warn('PermSet ObjectPermissions query failed',e); }
+    const permSets={};
+    result.objectPerms.forEach(op=>{
+      const psName=op.Parent?.Label||'Unknown';
+      if(!permSets[psName]) permSets[psName]={crud:null};
+      permSets[psName].crud={
+        read:op.PermissionsRead,create:op.PermissionsCreate,edit:op.PermissionsEdit,
+        delete:op.PermissionsDelete,viewAll:op.PermissionsViewAllRecords,modifyAll:op.PermissionsModifyAllRecords
+      };
+    });
+    result.permSets=permSets;
+    permSetCache[objectApi]=result;
+    return result;
+  }
+
+  function renderPermSetsInProfilesTab(objectApi, container) {
+    fetchPermSetPermissions(objectApi).then(data=>{
+      const ps=data.permSets;const names=Object.keys(ps).sort();
+      if(!names.length) return;
+      let h='<div class="detail-section" style="margin-top:16px"><div class="detail-section-title">Permission Sets ('+names.length+')</div>';
+      names.forEach(name=>{
+        const p=ps[name];
+        h+='<div class="profile-accordion" data-profile="ps-'+escHtml(name)+'">';
+        h+='<div class="profile-accordion-header">';
+        h+='<span class="profile-accordion-arrow">▶</span>';
+        h+='<span class="profile-accordion-name">🛡️ '+escHtml(name)+'</span>';
+        if(p.crud){const c=[p.crud.read,p.crud.create,p.crud.edit,p.crud.delete].filter(Boolean).length;h+='<span class="pl-accordion-count">'+c+'/4 CRUD</span>';}
+        h+='</div><div class="profile-accordion-body">';
+        if(p.crud){
+          h+='<div class="profile-sub-title">Object Permissions (CRUD)</div><div class="crud-row">';
+          [['Read',p.crud.read],['Create',p.crud.create],['Edit',p.crud.edit],['Delete',p.crud.delete],['View All',p.crud.viewAll],['Modify All',p.crud.modifyAll]].forEach(([l,v])=>{
+            h+='<span class="crud-badge '+(v?'on':'off')+'">'+(v?'✓':'✕')+' '+l+'</span>';
+          });
+          h+='</div>';
+        }
+        h+='</div></div>';
+      });
+      h+='</div>';
+      container.insertAdjacentHTML('beforeend',h);
+      container.querySelectorAll('.profile-accordion-header').forEach(hdr=>{
+        if(!hdr._bound){hdr._bound=true;hdr.addEventListener('click',()=>hdr.parentElement.classList.toggle('open'));}
+      });
+    }).catch(e=>console.warn('PermSet render failed',e));
+  }
+
+  // ═══ UNDO / REDO ═══
+  function pushUndo(){undoStack.push(JSON.stringify(nodePositions));redoStack=[];if(undoStack.length>50)undoStack.shift();}
+  function undo(){if(!undoStack.length)return;redoStack.push(JSON.stringify(nodePositions));nodePositions=JSON.parse(undoStack.pop());renderERD();}
+  function redo(){if(!redoStack.length)return;undoStack.push(JSON.stringify(nodePositions));nodePositions=JSON.parse(redoStack.pop());renderERD();}
+
+  // ═══ CONTEXT MENU ═══
+  function showContextMenu(x,y,api){
+    contextTarget=api;
+    const menu=$('#contextMenu');
+    menu.style.left=x+'px';menu.style.top=y+'px';
+    menu.classList.add('visible');
+  }
+  function hideContextMenu(){$('#contextMenu').classList.remove('visible');contextTarget=null;}
+  function handleContextAction(action){
+    if(!contextTarget)return;
+    const api=contextTarget;
+    hideContextMenu();
+    if(action==='details') showDetail(api);
+    else if(action==='remove') toggleObject(api);
+    else if(action==='copy-api') copyToClipboard(api);
+    else if(action==='export-single'){
+      const meta=objectMeta[api];if(!meta)return;
+      let m='erDiagram\n    '+api.replace(/__c$/,'_c')+' {\n';
+      meta.fields.filter(f=>!f.deprecatedAndHidden).forEach(f=>{m+='        string '+f.name+'\n';});
+      m+='    }\n';
+      navigator.clipboard.writeText(m).then(()=>showToast('Copied Mermaid for '+meta.label,'📋'));
+    }
+  }
+
+  // ═══ THEME TOGGLE ═══
+  function toggleTheme(){
+    isDarkTheme=!isDarkTheme;
+    document.body.classList.toggle('light-theme',!isDarkTheme);
+    try{localStorage.setItem('schelio_theme',isDarkTheme?'dark':'light');}catch(e){}
+    showToast(isDarkTheme?'Dark theme':'Light theme','🎨');
+  }
+  function loadTheme(){
+    try{const t=localStorage.getItem('schelio_theme');if(t==='light'){isDarkTheme=false;document.body.classList.add('light-theme');}}catch(e){}
+  }
 
   // ═══ EVENTS ═══
   function setupEventListeners(){
@@ -1047,17 +1399,29 @@ ${objectSections}${erdSummary}
     $('#btnFitAll').addEventListener('click',fitAll);$('#btnAutoLayout').addEventListener('click',autoLayout);
     $('#btnToggleRelations').addEventListener('click',()=>{showRelations=!showRelations;$('#btnToggleRelations').classList.toggle('active',showRelations);renderERD();});
     $('#btnExportPng').addEventListener('click',exportPng);$('#btnExportSvg').addEventListener('click',exportSvg);
-    $('#btnExportMermaid').addEventListener('click',showMermaidModal);$('#btnExportPdf').addEventListener('click',exportPdfSpec);
+    $('#btnExportMermaid').addEventListener('click',showMermaidModal);$('#btnExportPlantUml').addEventListener('click',showPlantUmlModal);$('#btnExportCsv').addEventListener('click',exportCsv);$('#btnExportPdf').addEventListener('click',exportPdfSpec);
     $('#btnSaveLayout').addEventListener('click',saveLayout);$('#btnLoadLayout').addEventListener('click',loadLayout);
     $('#mermaidModalClose').addEventListener('click',()=>$('#mermaidModal').classList.remove('visible'));
     $('#mermaidModalCancel').addEventListener('click',()=>$('#mermaidModal').classList.remove('visible'));
     $('#mermaidCopy').addEventListener('click',copyMermaid);
+    $('#plantumlModalClose').addEventListener('click',()=>$('#plantumlModal').classList.remove('visible'));
+    $('#plantumlModalCancel').addEventListener('click',()=>$('#plantumlModal').classList.remove('visible'));
+    $('#plantumlCopy').addEventListener('click',copyPlantUml);
     $('#detailClose').addEventListener('click',()=>detailPanel.classList.remove('visible'));
+    $('#btnThemeToggle').addEventListener('click',toggleTheme);
     $('#btnToggleRelations').classList.add('active');
+    // Context menu
+    erdCanvas.addEventListener('contextmenu',e=>{e.preventDefault();const n=e.target.closest('.erd-node');if(n){showContextMenu(e.clientX,e.clientY,n.dataset.api);}else{hideContextMenu();}});
+    document.addEventListener('click',()=>hideContextMenu());
+    document.querySelectorAll('.ctx-item').forEach(btn=>{btn.addEventListener('click',()=>handleContextAction(btn.dataset.action));});
+    // Copy buttons delegation
+    document.addEventListener('click',e=>{const cb=e.target.closest('.copy-btn');if(cb){e.stopPropagation();copyToClipboard(cb.dataset.copy);}});
+    loadTheme();
     document.addEventListener('keydown',e=>{
-      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');}
+      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');hideContextMenu();}
       if(e.ctrlKey&&e.key==='='){e.preventDefault();setZoom(zoom*1.2);}if(e.ctrlKey&&e.key==='-'){e.preventDefault();setZoom(zoom/1.2);}
       if(e.ctrlKey&&e.key==='0'){e.preventDefault();fitAll();}if(e.ctrlKey&&e.key==='s'){e.preventDefault();saveLayout();}
+      if(e.ctrlKey&&e.key==='z'){e.preventDefault();undo();}if(e.ctrlKey&&e.key==='y'){e.preventDefault();redo();}
       if(e.ctrlKey&&e.key==='f'){e.preventDefault();const tabs=document.querySelectorAll('.sidebar-tab');if(tabs[1])tabs[1].click();fieldSearchInput.focus();}
     });
   }
