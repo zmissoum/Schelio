@@ -167,7 +167,7 @@
       );
       flexiPageCache[objectApi] = data.records || [];
     } catch(e) {
-      console.warn('FlexiPage fetch failed for', objectApi, e);
+      // FlexiPage query not supported for all objects — silent fallback
       flexiPageCache[objectApi] = [];
     }
     return flexiPageCache[objectApi];
