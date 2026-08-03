@@ -18,7 +18,9 @@ Chrome extension (Manifest V3) — interactive ERD viewer for Salesforce.
 - `escCsv(s)` — escape values for CSV export
 - Detail panel has 8 tabs, each rendered by a `render*Tab()` function
 - Async tab data is guarded by `activeDetailObject` to prevent race conditions
-- Caches: `objectMeta`, `picklistCache`, `layoutCache`, `flexiPageCache`, `profileCache`, `permSetCache`, `validationRuleCache`, `automationCache`
+- Caches: `objectMeta`, `picklistCache`, `layoutCache`, `flexiPageCache`, `profileCache`, `permSetCache`, `validationRuleCache`, `automationCache`, `sharingModelCache`
+- Impact analysis: `analyzeFieldUsage()` regex-matches a field API name in VR formulas, `calculatedFormula`, and trigger `Body` (fetched in `fetchAutomation`)
+- Layout sharing: `shareLayout()`/`importLayout()` use a base64 `SCHELIO1.` code — never include the session token in shared payloads
 
 ## Conventions
 

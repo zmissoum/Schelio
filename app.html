@@ -62,6 +62,7 @@
         <button class="filter-btn active" data-filter="all">All</button>
         <button class="filter-btn" data-filter="standard">Standard</button>
         <button class="filter-btn" data-filter="custom">Custom</button>
+        <button class="filter-btn" data-filter="config" title="Custom Metadata Types & Custom Settings">Config</button>
       </div>
 
       <div class="sidebar-objects" id="objectList"></div>
@@ -86,6 +87,12 @@
           </button>
           <button class="layout-btn" id="btnLoadLayout" title="Load layout">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 13h12M8 1v9M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="layout-btn" id="btnShareLayout" title="Copy shareable layout code">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="12" cy="3.5" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="12.5" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 7l4.4-2.5M5.8 9l4.4 2.5" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+          <button class="layout-btn" id="btnImportLayout" title="Import layout code">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v6M5 8l3 3 3-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
       </div>
@@ -115,6 +122,11 @@
         </button>
       </div>
       <div class="toolbar-center">
+        <div class="canvas-search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <input type="text" id="canvasSearch" placeholder="Find on canvas…" autocomplete="off" />
+          <div class="canvas-search-results" id="canvasSearchResults"></div>
+        </div>
         <span class="zoom-label" id="zoomLabel">100%</span>
       </div>
       <div class="toolbar-right">
@@ -137,6 +149,10 @@
         <button class="tool-btn" id="btnExportCsv" title="Export CSV field inventory">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12v2a2 2 0 002 2h8a2 2 0 002-2v-2M9 2v10M5 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>CSV</span>
+        </button>
+        <button class="tool-btn" id="btnExportDeps" title="Export picklist dependencies of all selected objects (CSV)">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="4" cy="4" r="2.2" stroke="currentColor" stroke-width="1.3"/><circle cx="13" cy="9" r="2.2" stroke="currentColor" stroke-width="1.3"/><circle cx="4" cy="14" r="2.2" stroke="currentColor" stroke-width="1.3"/><path d="M6 5l5 3M6 13l5-3" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span>Deps</span>
         </button>
         <div class="toolbar-sep"></div>
         <button class="tool-btn tool-btn-accent" id="btnExportPdf" title="Export PDF Technical Spec">
@@ -264,6 +280,22 @@
       <div class="modal-footer">
         <button class="modal-btn modal-btn-secondary" id="plantumlModalCancel">Close</button>
         <button class="modal-btn modal-btn-primary" id="plantumlCopy">Copy to clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Field Usage Modal (Impact Analysis) -->
+  <div class="modal-overlay" id="fieldUsageModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="fieldUsageTitle">Field Usage</h3>
+        <button class="detail-close" id="fieldUsageClose">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="fieldUsageBody"></div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-secondary" id="fieldUsageCancel">Close</button>
       </div>
     </div>
   </div>

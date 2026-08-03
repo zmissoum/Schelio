@@ -54,20 +54,24 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 - **Auto-layout** — Intelligent grid positioning based on relationship density
 - **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` for all canvas operations
 - **Context menu** — Right-click any card for quick actions (details, remove, copy API name, export)
+- **Canvas search** — Find and zoom to any loaded object with highlight pulse
+- **Polymorphic lookups** — Dashed lines and POLY badges for fields referencing multiple objects (WhoId/WhatId)
+- **Layout sharing** — Copy a compact layout code and share it with a teammate (no session data included)
+- **Config objects** — Custom Metadata Types and Custom Settings get their own badges and sidebar filter
 - **Detail panel** — Double-click any card for full metadata (see below)
 
 ### Detail Panel (8 tabs)
 
 | Tab | Content |
 |-----|---------|
-| **Overview** | Fields, relationships, metadata with copy buttons on API names |
+| **Overview** | Fields with copy buttons, **formula display** (ƒx), **field usage analysis** (🔎 — which validation rules, formulas & triggers reference a field), Org-Wide Defaults (sharing model), polymorphic lookup badges |
 | **Record Types** | Active/inactive RTs with IDs and defaults |
 | **Picklists** | Values by Record Type + **dependent picklist visualization** with interactive filtering + **CSV export** of parent→child value mappings (incl. multi-select) |
 | **Layouts** | Page Layouts, Lightning Record Pages, RT-to-Layout mapping |
 | **Profiles** | CRUD permissions + Field-Level Security per profile |
 | **Permission Sets** | CRUD permissions per Permission Set |
 | **Rules** | Validation Rules with **formulas**, error messages, and status |
-| **Automation** | Record-triggered Flows and Apex Triggers with events |
+| **Automation** | Record-triggered Flows, Apex Triggers with events, and Approval Processes |
 | **Health** | Schema health score (/100), limit bars, and warnings |
 
 ### Cross-Object Field Search
@@ -89,6 +93,7 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 | **Mermaid** | Full ERD in Mermaid syntax, ready for GitHub/Notion/Confluence |
 | **PlantUML** | Full ERD in PlantUML syntax |
 | **CSV** | Field inventory spreadsheet across all selected objects |
+| **Deps CSV** | Dependent picklist mappings (parent→child values) across all selected objects |
 | **PDF Spec** | Complete technical data model spec document (see below) |
 
 ### PDF Technical Specification
@@ -242,11 +247,13 @@ Schelio requires the following Chrome permissions:
 - [x] Undo/Redo on canvas
 - [x] Dependent picklist visualization
 - [x] CSV field inventory export
+- [x] Force-directed graph layout (physics-based)
+- [x] Field-level dependency tracking (validation rules, formulas & triggers referencing a field)
+- [x] Chrome Web Store publication
+- [x] Org-Wide Defaults & Approval Processes
+- [x] Layout sharing via code
 - [ ] Firefox support (Manifest V3 compat)
-- [ ] Force-directed graph layout (physics-based)
-- [ ] Field-level dependency tracking (which flows/triggers use a field)
 - [ ] Org-to-org schema comparison
-- [ ] Chrome Web Store publication
 - [ ] i18n (French, Spanish, German)
 
 See the [open issues](https://github.com/zmissoum/Schelio/issues) for a full list of proposed features and known bugs.

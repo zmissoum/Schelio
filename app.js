@@ -274,13 +274,17 @@
   // ═══ OBJECT LIST ═══
   function renderObjectList() {
     const s=searchInput.value.toLowerCase();
+    const isConfig=o=>o.name.endsWith('__mdt')||!!o.customSetting;
     const filtered=allObjects.filter(o=>{
       const m=o.label.toLowerCase().includes(s)||o.name.toLowerCase().includes(s);
-      if(activeFilter==='custom') return m&&o.custom; if(activeFilter==='standard') return m&&!o.custom; return m;
+      if(activeFilter==='custom') return m&&o.custom&&!isConfig(o);
+      if(activeFilter==='standard') return m&&!o.custom;
+      if(activeFilter==='config') return m&&isConfig(o);
+      return m;
     });
     objectList.innerHTML=filtered.map(o=>{
       const sel=selectedObjects.has(o.name)?' selected':'';
-      const badge=o.custom?'<span class="obj-badge custom">Custom</span>':'<span class="obj-badge standard">Std</span>';
+      const badge=o.name.endsWith('__mdt')?'<span class="obj-badge mdt">MDT</span>':o.customSetting?'<span class="obj-badge setting">Setting</span>':o.custom?'<span class="obj-badge custom">Custom</span>':'<span class="obj-badge standard">Std</span>';
       return '<div class="obj-item'+sel+'" data-api="'+o.name+'"><div class="obj-check"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="obj-info"><div class="obj-label">'+o.label+'</div><div class="obj-api">'+o.name+'</div></div>'+badge+'</div>';
     }).join('');
     const items=objectList.querySelectorAll('.obj-item');
@@ -453,11 +457,16 @@
     h += '<div class="detail-stat"><span class="detail-stat-label">API Name</span><span class="detail-stat-value">'+escHtml(meta.name)+' '+copyBtn(meta.name)+'</span></div>';
     h += '<div class="detail-stat"><span class="detail-stat-label">Key Prefix</span><span class="detail-stat-value">'+(meta.keyPrefix||'—')+' '+(meta.keyPrefix?copyBtn(meta.keyPrefix):'')+'</span></div>';
     h += sr('Label',meta.label)+sr('Fields',meta.fields.length)+sr('Custom',meta.custom?'Yes':'No');
-    h += sr('Record Types',(meta.recordTypeInfos||[]).filter(r=>r.active).length)+'</div>';
+    h += sr('Record Types',(meta.recordTypeInfos||[]).filter(r=>r.active).length);
+    h += '<div id="owdStats"></div></div>';
 
     h += '<div class="detail-section"><div class="detail-section-title">Fields ('+fields.length+')</div>';
     h += '<div class="detail-field-search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><input type="text" id="overviewFieldSearch" placeholder="Filter fields..." autocomplete="off"/></div>';
-    fields.forEach(f=>{h+='<div class="detail-field-row" data-field-label="'+escHtml(f.label.toLowerCase())+'" data-field-api="'+escHtml(f.name.toLowerCase())+'"><div class="detail-field-icon">'+(FIELD_ICONS[f.type]||FIELD_ICONS.default)+'</div><div class="detail-field-name">'+escHtml(f.label)+(f.nillable?'':' *')+'</div><div class="detail-field-api">'+escHtml(f.name)+' '+copyBtn(f.name)+'</div><div class="detail-field-type">'+f.type+'</div></div>';});
+    fields.forEach(f=>{
+      const hasFormula=!!f.calculatedFormula;
+      h+='<div class="detail-field-row" data-field-label="'+escHtml(f.label.toLowerCase())+'" data-field-api="'+escHtml(f.name.toLowerCase())+'"><div class="detail-field-icon">'+(FIELD_ICONS[f.type]||FIELD_ICONS.default)+'</div><div class="detail-field-name">'+escHtml(f.label)+(f.nillable?'':' *')+'</div><div class="detail-field-api">'+escHtml(f.name)+' '+copyBtn(f.name)+'</div><div class="detail-field-type">'+f.type+'</div>'+(hasFormula?'<button class="formula-badge" title="Show formula">ƒx</button>':'')+'<button class="field-usage-btn" data-field="'+escHtml(f.name)+'" title="Where is this field used?">🔎</button></div>';
+      if(hasFormula) h+='<div class="field-formula-block"><pre>'+escHtml(f.calculatedFormula)+'</pre></div>';
+    });
     h += '</div>';
     // Bind search after render (deferred)
     setTimeout(()=>{
@@ -465,18 +474,49 @@
       if(input) input.addEventListener('input',()=>{
         const q=input.value.toLowerCase().trim();
         document.querySelectorAll('#dtabOverview .detail-field-row').forEach(row=>{
-          const match=!q||row.dataset.fieldLabel.includes(q)||row.dataset.fieldApi.includes(q);
+          const match=!q||(row.dataset.fieldLabel||'').includes(q)||(row.dataset.fieldApi||'').includes(q);
           row.classList.toggle('hidden',!match);
+          const next=row.nextElementSibling;
+          if(next&&next.classList.contains('field-formula-block')) next.classList.toggle('hidden',!match);
         });
       });
     },0);
 
     if(rels.length){
       h+='<div class="detail-section"><div class="detail-section-title">Relationships ('+rels.length+')</div>';
-      rels.forEach(f=>{h+='<div class="detail-field-row"><div class="detail-field-icon">🔗</div><div class="detail-field-name">'+f.name+'</div><div class="detail-field-type">'+(f.referenceTo||[]).join(', ')+'</div></div>';});
+      rels.forEach(f=>{
+        const isPoly=(f.referenceTo||[]).length>1;
+        h+='<div class="detail-field-row"><div class="detail-field-icon">🔗</div><div class="detail-field-name">'+escHtml(f.name)+(isPoly?' <span class="rel-tooltip-badge poly" title="Polymorphic lookup">POLY</span>':'')+'</div><div class="detail-field-type">'+(f.referenceTo||[]).join(', ')+'</div></div>';
+      });
       h+='</div>';
     }
     $('#dtabOverview').innerHTML = h;
+
+    // Async: Org-Wide Defaults (sharing model)
+    fetchSharingModel(meta.name).then(sm=>{
+      if(activeDetailObject!==meta.name) return;
+      const el=$('#owdStats');
+      if(!el||!sm) return;
+      el.innerHTML=sr('Sharing (Internal)',formatSharing(sm.InternalSharingModel))+sr('Sharing (External)',formatSharing(sm.ExternalSharingModel));
+    }).catch(()=>{});
+  }
+
+  // ═══ ORG-WIDE DEFAULTS (Sharing Model) ═══
+  let sharingModelCache = {};
+  async function fetchSharingModel(objectApi) {
+    if(objectApi in sharingModelCache) return sharingModelCache[objectApi];
+    try {
+      const d=await sfToolingQuery(
+        "SELECT QualifiedApiName, InternalSharingModel, ExternalSharingModel "+
+        "FROM EntityDefinition WHERE QualifiedApiName = '"+escSoql(objectApi)+"'"
+      );
+      sharingModelCache[objectApi]=(d.records&&d.records[0])||null;
+    } catch(e) { sharingModelCache[objectApi]=null; }
+    return sharingModelCache[objectApi];
+  }
+  function formatSharing(v){
+    const map={ReadWrite:'Public Read/Write',Read:'Public Read Only',Private:'Private',ControlledByParent:'Controlled by Parent',FullAccess:'Public Full Access',ReadWriteTransfer:'Public Read/Write/Transfer',ReadSelect:'Use'};
+    return map[v]||v||'—';
   }
 
   function renderRecordTypesTab(meta) {
@@ -602,15 +642,12 @@
   }
 
   // ═══ EXPORT PICKLIST DEPENDENCIES TO CSV ═══
-  function exportPicklistDepsCsv(meta) {
+  const DEPS_CSV_HEADER = 'Object,Object API,Controlling Field,Controlling Field API,Controlling Value,Dependent Field,Dependent Field API,Dependent Value,Dependent Value API,Field Type\n';
+
+  function buildDepsCsvRows(meta) {
     const deps = buildPicklistDependencies(meta);
-    const depFields = Object.keys(deps.dependent);
-    if (!depFields.length) { showToast('No dependent picklists on this object', '⚠️'); return; }
-
-    let csv = 'Object,Object API,Controlling Field,Controlling Field API,Controlling Value,Dependent Field,Dependent Field API,Dependent Value,Dependent Value API,Field Type\n';
-    let rowCount = 0;
-
-    depFields.forEach(depApi => {
+    let rows = '', count = 0;
+    Object.keys(deps.dependent).forEach(depApi => {
       const ctrlApi = deps.dependent[depApi];
       const depField = meta.fields.find(f => f.name === depApi);
       const ctrlField = meta.fields.find(f => f.name === ctrlApi);
@@ -621,24 +658,48 @@
       const matrix = buildDependencyMatrix(meta, ctrlApi, depApi);
       Object.entries(matrix).forEach(([ctrlVal, depVals]) => {
         depVals.forEach(dv => {
-          csv += escCsv(meta.label) + ',' + escCsv(meta.name) + ',' +
-                 escCsv(ctrlLabel) + ',' + escCsv(ctrlApi) + ',' + escCsv(ctrlVal) + ',' +
-                 escCsv(depLabel) + ',' + escCsv(depApi) + ',' +
-                 escCsv(dv.label) + ',' + escCsv(dv.value) + ',' + escCsv(fieldType) + '\n';
-          rowCount++;
+          rows += escCsv(meta.label) + ',' + escCsv(meta.name) + ',' +
+                  escCsv(ctrlLabel) + ',' + escCsv(ctrlApi) + ',' + escCsv(ctrlVal) + ',' +
+                  escCsv(depLabel) + ',' + escCsv(depApi) + ',' +
+                  escCsv(dv.label) + ',' + escCsv(dv.value) + ',' + escCsv(fieldType) + '\n';
+          count++;
         });
       });
     });
+    return { rows, count };
+  }
 
-    if (!rowCount) { showToast('No dependency mappings found', '⚠️'); return; }
-
+  function downloadCsv(content, filename) {
     const a = document.createElement('a');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
     a.href = url;
-    a.download = 'schelio-picklist-dependencies-' + meta.name + '.csv';
+    a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('Exported ' + rowCount + ' dependency mappings', '📊');
+  }
+
+  function exportPicklistDepsCsv(meta) {
+    const deps = buildPicklistDependencies(meta);
+    if (!Object.keys(deps.dependent).length) { showToast('No dependent picklists on this object', '⚠️'); return; }
+    const { rows, count } = buildDepsCsvRows(meta);
+    if (!count) { showToast('No dependency mappings found', '⚠️'); return; }
+    downloadCsv(DEPS_CSV_HEADER + rows, 'schelio-picklist-dependencies-' + meta.name + '.csv');
+    showToast('Exported ' + count + ' dependency mappings', '📊');
+  }
+
+  function exportAllDepsCsv() {
+    const selected = [...selectedObjects];
+    if (!selected.length) { showToast('Select objects first', '⚠️'); return; }
+    let all = '', total = 0, objectsWithDeps = 0;
+    selected.forEach(api => {
+      const meta = objectMeta[api];
+      if (!meta) return;
+      const { rows, count } = buildDepsCsvRows(meta);
+      if (count) { all += rows; total += count; objectsWithDeps++; }
+    });
+    if (!total) { showToast('No dependent picklists found in selected objects', '⚠️'); return; }
+    downloadCsv(DEPS_CSV_HEADER + all, 'schelio-picklist-dependencies.csv');
+    showToast('Exported ' + total + ' mappings from ' + objectsWithDeps + ' object(s)', '📊');
   }
 
   function buildDepChains(deps) {
@@ -1101,7 +1162,7 @@ ${objectSections}${erdSummary}
   // ═══ RELATIONSHIPS ═══
   function buildRelationships() {
     relationships=[];const sel=[...selectedObjects];
-    sel.forEach(api=>{const m=objectMeta[api];if(!m)return;m.fields.forEach(f=>{if(f.type==='reference'&&f.referenceTo)f.referenceTo.forEach(ref=>{if(sel.includes(ref))relationships.push({from:api,to:ref,field:f.name,label:f.relationshipName||f.name,type:f.cascadeDelete?'master-detail':'lookup'});});});});
+    sel.forEach(api=>{const m=objectMeta[api];if(!m)return;m.fields.forEach(f=>{if(f.type==='reference'&&f.referenceTo)f.referenceTo.forEach(ref=>{if(sel.includes(ref))relationships.push({from:api,to:ref,field:f.name,label:f.relationshipName||f.name,type:f.cascadeDelete?'master-detail':'lookup',poly:f.referenceTo.length>1});});});});
   }
 
   // ═══ ERD RENDERING ═══
@@ -1169,16 +1230,17 @@ ${objectSections}${erdSummary}
 
       // Invisible wider hit area for click
       const hitPath=svgEl('path',{d:pathD,fill:'none',stroke:'transparent','stroke-width':'16',style:'cursor:pointer'});
-      const tooltip=group.rels.map(r=>(r.type==='master-detail'?'[MD] ':'[LK] ')+r.field+' ('+r.from+' → '+r.to+')').join('\n');
+      const tooltip=group.rels.map(r=>(r.type==='master-detail'?'[MD] ':'[LK] ')+r.field+(r.poly?' [POLY]':'')+' ('+r.from+' → '+r.to+')').join('\n');
       const tipEl=svgEl('title',{});tipEl.textContent=tooltip;hitPath.appendChild(tipEl);
       hitPath.addEventListener('click',()=>{
         showRelTooltip(mx,my,group.rels);
       });
       erdRels.appendChild(hitPath);
 
-      // Visible line
+      // Visible line — dashed when every relation in the group is polymorphic
+      const allPoly=group.rels.every(r=>r.poly);
       const lineWidth=Math.min(1.5+count*0.5,4);
-      erdRels.appendChild(svgEl('path',{class:'rel-line '+(hasMD?'master-detail':'lookup'),d:pathD,'stroke-width':lineWidth,'marker-end':hasMD?'url(#arrowMD)':'url(#arrowLookup)'}));
+      erdRels.appendChild(svgEl('path',{class:'rel-line '+(hasMD?'master-detail':'lookup')+(allPoly?' poly':''),d:pathD,'stroke-width':lineWidth,'marker-end':hasMD?'url(#arrowMD)':'url(#arrowLookup)'}));
 
       // Label
       const labelText=count>1?count+' relations':group.rels[0].field;
@@ -1200,7 +1262,8 @@ ${objectSections}${erdSummary}
     let h='<div class="rel-tooltip-title">Relationships ('+rels.length+')</div>';
     rels.forEach(rel=>{
       const badge=rel.type==='master-detail'?'<span class="rel-tooltip-badge md">MD</span>':'<span class="rel-tooltip-badge lk">LK</span>';
-      h+='<div class="rel-tooltip-row">'+badge+'<span class="rel-tooltip-field">'+escHtml(rel.field)+'</span><span class="rel-tooltip-path">'+escHtml(rel.from)+' → '+escHtml(rel.to)+'</span></div>';
+      const polyBadge=rel.poly?'<span class="rel-tooltip-badge poly" title="Polymorphic — this field can reference multiple object types">POLY</span>':'';
+      h+='<div class="rel-tooltip-row">'+badge+polyBadge+'<span class="rel-tooltip-field">'+escHtml(rel.field)+'</span><span class="rel-tooltip-path">'+escHtml(rel.from)+' → '+escHtml(rel.to)+'</span></div>';
     });
     div.innerHTML=h;
     div.style.left=screenX+'px';div.style.top=(screenY+16)+'px';
@@ -1403,7 +1466,7 @@ ${objectSections}${erdSummary}
   // ═══ FLOWS & TRIGGERS (Tooling API) ═══
   async function fetchAutomation(objectApi) {
     if(automationCache[objectApi]) return automationCache[objectApi];
-    const result={flows:[],triggers:[]};
+    const result={flows:[],triggers:[],approvals:[]};
     // FlowDefinitionView is a standard REST API object, not Tooling
     const mapFlows=(records)=>(records||[]).map(f=>({
       MasterLabel:f.Label||f.MasterLabel, DeveloperName:f.ApiName||f.DeveloperName,
@@ -1441,11 +1504,20 @@ ${objectSections}${erdSummary}
     try {
       const trigData=await sfToolingQuery(
         "SELECT Id, Name, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, "+
-        "UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status "+
+        "UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status, Body "+
         "FROM ApexTrigger WHERE TableEnumOrId = '"+escSoql(objectApi)+"'"
       );
       result.triggers=trigData.records||[];
     } catch(e) { console.warn('ApexTrigger query failed',e); }
+    try {
+      const apData=await sfApi(
+        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
+          "SELECT Id, Name, DeveloperName, State, TableEnumOrId FROM ProcessDefinition "+
+          "WHERE TableEnumOrId = '"+escSoql(objectApi)+"' AND Type = 'Approval' ORDER BY Name"
+        )
+      );
+      result.approvals=apData.records||[];
+    } catch(e) { console.warn('ProcessDefinition query failed',e); }
     automationCache[objectApi]=result;
     return result;
   }
@@ -1489,6 +1561,20 @@ ${objectSections}${erdSummary}
         h+='</div></div>';
       });
     } else { h+='<div class="empty-tab-msg">No Apex triggers found.</div>'; }
+    h+='</div>';
+    // Approval Processes
+    const approvals=data.approvals||[];
+    h+='<div class="detail-section"><div class="detail-section-title">Approval Processes ('+approvals.length+')</div>';
+    if(approvals.length){
+      approvals.forEach(a=>{
+        h+='<div class="layout-card"><div class="layout-card-header">';
+        h+='<span class="layout-card-icon">✅</span>';
+        h+='<div class="layout-card-info"><div class="layout-card-name">'+escHtml(a.Name)+' '+copyBtn(a.DeveloperName||a.Name)+'</div>';
+        h+='<div class="layout-card-type">'+escHtml(a.DeveloperName||'')+'</div></div>';
+        h+='<span class="rt-badge '+(a.State==='Active'?'active':'inactive')+'">'+escHtml(a.State||'—')+'</span>';
+        h+='</div></div>';
+      });
+    } else { h+='<div class="empty-tab-msg">No approval processes found.</div>'; }
     h+='</div>';
     $('#dtabAutomation').innerHTML=h;
     // copy-btn handled by document-level delegation
@@ -1652,6 +1738,108 @@ ${objectSections}${erdSummary}
     }
   }
 
+  // ═══ IMPACT ANALYSIS — WHERE IS THIS FIELD USED? ═══
+  async function analyzeFieldUsage(meta, fieldApi) {
+    const objectApi = meta.name;
+    const [rules, automation] = await Promise.all([
+      fetchValidationRules(objectApi),
+      fetchAutomation(objectApi)
+    ]);
+    // Word-boundary match on the API name (avoid matching Account_Type when looking for Type)
+    const esc = fieldApi.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(^|[^A-Za-z0-9_])' + esc + '([^A-Za-z0-9_]|$)', 'i');
+
+    const inRules = rules.filter(r => (r.Formula && re.test(r.Formula)) || r.ErrorDisplayField === fieldApi);
+    const inFormulas = meta.fields.filter(f => f.name !== fieldApi && f.calculatedFormula && re.test(f.calculatedFormula));
+    const inTriggers = (automation.triggers || []).filter(t => t.Body && re.test(t.Body));
+    return { inRules, inFormulas, inTriggers, flowCount: (automation.flows || []).length };
+  }
+
+  async function showFieldUsage(fieldApi) {
+    const meta = objectMeta[activeDetailObject];
+    if (!meta) return;
+    const f = meta.fields.find(ff => ff.name === fieldApi);
+    $('#fieldUsageTitle').textContent = 'Where is "' + (f ? f.label : fieldApi) + '" used?';
+    $('#fieldUsageBody').innerHTML = '<div class="detail-loading"><div class="detail-spinner"></div><span>Analyzing validation rules, formulas & triggers…</span></div>';
+    $('#fieldUsageModal').classList.add('visible');
+    const requested = activeDetailObject;
+    try {
+      const u = await analyzeFieldUsage(meta, fieldApi);
+      if (activeDetailObject !== requested) return;
+      const total = u.inRules.length + u.inFormulas.length + u.inTriggers.length;
+      let h = '<div class="usage-summary">' + (total ? '⚠️ Referenced in <strong>' + total + '</strong> place(s)' : '✅ No references found in validation rules, formulas or triggers') + ' — <span class="usage-api">' + escHtml(fieldApi) + '</span></div>';
+
+      h += '<div class="usage-section"><div class="detail-section-title">Validation Rules (' + u.inRules.length + ')</div>';
+      if (u.inRules.length) u.inRules.forEach(r => {
+        h += '<div class="usage-row"><span class="usage-badge vr">VR</span><span class="usage-name">' + escHtml(r.ValidationName) + '</span><span class="rt-badge ' + (r.Active ? 'active' : 'inactive') + '">' + (r.Active ? 'Active' : 'Inactive') + '</span></div>';
+      });
+      else h += '<div class="usage-empty">None</div>';
+      h += '</div>';
+
+      h += '<div class="usage-section"><div class="detail-section-title">Formula Fields (' + u.inFormulas.length + ')</div>';
+      if (u.inFormulas.length) u.inFormulas.forEach(ff => {
+        h += '<div class="usage-row"><span class="usage-badge fx">ƒx</span><span class="usage-name">' + escHtml(ff.label) + '</span><span class="usage-api">' + escHtml(ff.name) + '</span></div>';
+      });
+      else h += '<div class="usage-empty">None</div>';
+      h += '</div>';
+
+      h += '<div class="usage-section"><div class="detail-section-title">Apex Triggers (' + u.inTriggers.length + ')</div>';
+      if (u.inTriggers.length) u.inTriggers.forEach(t => {
+        h += '<div class="usage-row"><span class="usage-badge trg">TRG</span><span class="usage-name">' + escHtml(t.Name) + '</span><span class="rt-badge ' + (t.Status === 'Active' ? 'active' : 'inactive') + '">' + escHtml(t.Status || 'Active') + '</span></div>';
+      });
+      else h += '<div class="usage-empty">None</div>';
+      h += '</div>';
+
+      if (u.flowCount) h += '<div class="usage-note">ℹ️ ' + u.flowCount + ' record-triggered flow(s) run on this object. Field-level flow analysis is not available via the API — check them in Setup before deleting this field.</div>';
+
+      $('#fieldUsageBody').innerHTML = h;
+    } catch (e) {
+      $('#fieldUsageBody').innerHTML = '<div class="empty-tab-msg">Analysis failed.<br>' + escHtml(e.message) + '</div>';
+    }
+  }
+
+  // ═══ CANVAS SEARCH ═══
+  function focusObject(api) {
+    const p = nodePositions[api];
+    if (!p) return;
+    const r = erdCanvas.getBoundingClientRect();
+    const n = erdNodes.querySelector('[data-api="' + api + '"]');
+    const cardH = n ? parseInt(n.dataset.height) || 200 : 200;
+    zoom = Math.max(zoom, 0.8);
+    panX = r.width / 2 - (p.x + CARD_WIDTH / 2) * zoom;
+    panY = r.height / 2 - (p.y + cardH / 2) * zoom;
+    applyTransform();
+    if (n) { n.classList.add('node-highlight'); setTimeout(() => n.classList.remove('node-highlight'), 2000); }
+  }
+
+  // ═══ LAYOUT SHARE / IMPORT (code-based — no session token in the payload) ═══
+  function shareLayout() {
+    if (!selectedObjects.size) { showToast('Nothing to share — select objects first', '⚠️'); return; }
+    const payload = { v: 1, o: [...selectedObjects], p: nodePositions, z: zoom, x: panX, y: panY };
+    const code = 'SCHELIO1.' + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    navigator.clipboard.writeText(code)
+      .then(() => showToast('Layout code copied — share it with a teammate', '🔗'))
+      .catch(() => showToast('Copy failed', '⚠️'));
+  }
+
+  async function importLayout() {
+    const code = window.prompt('Paste a Schelio layout code (starts with SCHELIO1.):');
+    if (!code) return;
+    try {
+      const raw = code.trim().replace(/^SCHELIO1\./, '');
+      const L = JSON.parse(decodeURIComponent(escape(atob(raw))));
+      if (!L || !Array.isArray(L.o)) throw new Error('invalid payload');
+      showToast('Importing layout…', '⏳');
+      pushUndo();
+      selectedObjects = new Set(L.o);
+      nodePositions = L.p || {};
+      zoom = L.z || 1; panX = L.x || 0; panY = L.y || 0;
+      for (const o of L.o) { try { await fetchObjectDescribe(o); } catch (e) { console.warn('Describe failed for ' + o, e); } }
+      renderObjectList(); buildRelationships(); renderERD(); updateEmptyState(); applyTransform();
+      showToast('Imported ' + L.o.length + ' objects', '✓');
+    } catch (e) { showToast('Invalid layout code', '⚠️'); }
+  }
+
   // ═══ THEME TOGGLE ═══
   function toggleTheme(){
     isDarkTheme=!isDarkTheme;
@@ -1683,8 +1871,31 @@ ${objectSections}${erdSummary}
     $('#btnFitAll').addEventListener('click',fitAll);$('#btnAutoLayout').addEventListener('click',autoLayout);
     $('#btnToggleRelations').addEventListener('click',()=>{showRelations=!showRelations;$('#btnToggleRelations').classList.toggle('active',showRelations);renderERD();});
     $('#btnExportPng').addEventListener('click',exportPng);$('#btnExportSvg').addEventListener('click',exportSvg);
-    $('#btnExportMermaid').addEventListener('click',showMermaidModal);$('#btnExportPlantUml').addEventListener('click',showPlantUmlModal);$('#btnExportCsv').addEventListener('click',exportCsv);$('#btnExportPdf').addEventListener('click',exportPdfSpec);
+    $('#btnExportMermaid').addEventListener('click',showMermaidModal);$('#btnExportPlantUml').addEventListener('click',showPlantUmlModal);$('#btnExportCsv').addEventListener('click',exportCsv);$('#btnExportDeps').addEventListener('click',exportAllDepsCsv);$('#btnExportPdf').addEventListener('click',exportPdfSpec);
     $('#btnSaveLayout').addEventListener('click',saveLayout);$('#btnLoadLayout').addEventListener('click',loadLayout);
+    $('#btnShareLayout').addEventListener('click',shareLayout);$('#btnImportLayout').addEventListener('click',importLayout);
+    $('#fieldUsageClose').addEventListener('click',()=>$('#fieldUsageModal').classList.remove('visible'));
+    $('#fieldUsageCancel').addEventListener('click',()=>$('#fieldUsageModal').classList.remove('visible'));
+    // Canvas search
+    const canvasSearchInput=$('#canvasSearch'), canvasSearchResults=$('#canvasSearchResults');
+    canvasSearchInput.addEventListener('input',()=>{
+      const q=canvasSearchInput.value.toLowerCase().trim();
+      if(!q){canvasSearchResults.innerHTML='';canvasSearchResults.classList.remove('visible');return;}
+      const matches=[...selectedObjects].filter(api=>{const m=objectMeta[api];return api.toLowerCase().includes(q)||(m&&m.label.toLowerCase().includes(q));}).slice(0,8);
+      if(!matches.length){canvasSearchResults.innerHTML='<div class="canvas-search-empty">No object on canvas matches</div>';canvasSearchResults.classList.add('visible');return;}
+      canvasSearchResults.innerHTML=matches.map(api=>{const m=objectMeta[api];return '<div class="canvas-search-item" data-api="'+escHtml(api)+'"><span class="csi-label">'+escHtml(m?m.label:api)+'</span><span class="csi-api">'+escHtml(api)+'</span></div>';}).join('');
+      canvasSearchResults.classList.add('visible');
+      canvasSearchResults.querySelectorAll('.canvas-search-item').forEach(el=>el.addEventListener('click',()=>{focusObject(el.dataset.api);canvasSearchResults.classList.remove('visible');canvasSearchInput.value='';}));
+    });
+    canvasSearchInput.addEventListener('keydown',e=>{if(e.key==='Enter'){const first=canvasSearchResults.querySelector('.canvas-search-item');if(first)first.click();}});
+    document.addEventListener('click',e=>{if(!e.target.closest('.canvas-search'))canvasSearchResults.classList.remove('visible');});
+    // Overview delegation: formula toggle + field usage
+    document.addEventListener('click',e=>{
+      const fb=e.target.closest('.formula-badge');
+      if(fb){e.stopPropagation();const row=fb.closest('.detail-field-row');const blk=row&&row.nextElementSibling;if(blk&&blk.classList.contains('field-formula-block'))blk.classList.toggle('open');return;}
+      const ub=e.target.closest('.field-usage-btn');
+      if(ub){e.stopPropagation();showFieldUsage(ub.dataset.field);}
+    });
     $('#mermaidModalClose').addEventListener('click',()=>$('#mermaidModal').classList.remove('visible'));
     $('#mermaidModalCancel').addEventListener('click',()=>$('#mermaidModal').classList.remove('visible'));
     $('#mermaidCopy').addEventListener('click',copyMermaid);
@@ -1723,7 +1934,7 @@ ${objectSections}${erdSummary}
     loadTheme();
     document.addEventListener('keydown',e=>{
       const mod=e.ctrlKey||e.metaKey;
-      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');hideContextMenu();}
+      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');$('#fieldUsageModal').classList.remove('visible');hideContextMenu();}
       if(mod&&e.key==='='){e.preventDefault();setZoom(zoom*1.2);}if(mod&&e.key==='-'){e.preventDefault();setZoom(zoom/1.2);}
       if(mod&&e.key==='0'){e.preventDefault();fitAll();}if(mod&&e.key==='s'){e.preventDefault();saveLayout();}
       if(mod&&e.key==='z'){e.preventDefault();undo();}if(mod&&e.key==='y'){e.preventDefault();redo();}
