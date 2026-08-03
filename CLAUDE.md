@@ -25,10 +25,13 @@ Chrome extension (Manifest V3) — interactive ERD viewer for Salesforce.
 ## Conventions
 
 - All new SOQL queries must use `escSoql()` for user/API-sourced values
-- All error messages in innerHTML must use `escHtml(e.message)`
+- **Every** org-metadata string inserted via innerHTML must go through `escHtml()` (attribute-safe: escapes quotes too) — including labels, picklist values, profile names, and the PDF Spec template
+- Queries that can exceed 2000 rows must use `sfQueryAll`/`sfRestQueryAll`/`sfToolingQueryAll` (follows `nextRecordsUrl`), never raw `sfApi(query)`
+- The session token must NEVER appear in a URL, export, or shared payload — connection is handed over via `chrome.storage.session` (see `init()`/`background.js`)
 - API version must use `SF_API_VERSION` constant, never hardcoded
 - Copy buttons use document-level event delegation (no per-element listeners)
-- Undo stack: call `pushUndo()` before any position-changing operation
+- Undo stack: call `pushUndo()` before any state-changing operation — snapshots include positions AND selection
+- Fetch failures that would make analysis look falsely complete must set an explicit failure flag (see `triggersFailed`, `vrFetchFailed`) and be surfaced as "could not check"
 - Theme: CSS variables in `:root` overridden by `body.light-theme`
 
 ## Testing

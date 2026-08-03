@@ -41,6 +41,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const urlMatch = tab.url.match(/https:\/\/([^.]+)/);
         const orgSubdomain = urlMatch ? urlMatch[1] : null;
 
+        // Refuse a cookie that doesn't belong to this org: sending org A's token
+        // to org B's host would leak a valid session to the wrong org.
+        const cookieDomain = (cookieResp.domain || '').toLowerCase();
+        if (!orgSubdomain || !cookieDomain.includes(orgSubdomain.toLowerCase())) {
+          showDisconnected();
+          return;
+        }
+
         let apiInstanceUrl;
         if (orgSubdomain && cookieResp.domain) {
           // Build from cookie domain for accuracy

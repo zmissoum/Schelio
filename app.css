@@ -1020,16 +1020,6 @@ html, body {
   display: none;
 }
 
-.pl-ctrl-clickable {
-  cursor: pointer;
-  border-style: dashed;
-}
-
-.pl-ctrl-clickable:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
-}
-
 /* Layout Cards */
 .layout-card {
   background: var(--bg-surface);

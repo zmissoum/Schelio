@@ -34,7 +34,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'openApp') {
-    chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + '?' + new URLSearchParams(request.params).toString() });
+    // Hand the connection over via session storage — the session token must
+    // never appear in a URL (browser history, session restore, other extensions).
+    chrome.storage.session.set({ schelio_conn: request.params }, () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('app.html') });
+    });
     sendResponse({ ok: true });
     return true;
   }

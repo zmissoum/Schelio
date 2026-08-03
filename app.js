@@ -15,7 +15,7 @@
 
   let instanceUrl='', sessionId='', allObjects=[], selectedObjects=new Set(), objectMeta={}, nodePositions={}, relationships=[];
   let zoom=1, panX=0, panY=0, isPanning=false, panStart={x:0,y:0}, dragNode=null, dragOffset={x:0,y:0}, showRelations=true, activeFilter='all';
-  let undoStack=[], redoStack=[], contextTarget=null, isDarkTheme=true;
+  let undoStack=[], redoStack=[], contextTarget=null, isDarkTheme=true, sidebarAnchorIdx=-1, relTooltipClose=null;
 
   // Extended metadata caches
   let activeDetailObject = null;  // guard against async race conditions in detail panel
@@ -26,10 +26,12 @@
   let layoutAssignCache = {};    // objectApi -> [{ profile, recordType, layout }]
   let validationRuleCache = {};  // objectApi -> [rules]
   let automationCache = {};      // objectApi -> { flows, triggers }
-  let permSetCache = {};         // objectApi -> { objectPerms, fieldPerms }
+  let permSetCache = {};         // objectApi -> { objectPerms, permSets }
 
   const $ = s => document.querySelector(s);
-  function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+  // Attribute-safe HTML escaping: also escapes quotes so escHtml() output is
+  // safe both as text content and inside quoted attribute values.
+  function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
   function escSoql(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
   const loadingOverlay=$('#loadingOverlay'), loadingStatus=$('#loadingStatus'), loadingBar=$('#loadingBar');
   const objectList=$('#objectList'), objectCount=$('#objectCount'), searchInput=$('#searchInput');
@@ -37,12 +39,26 @@
   const erdCanvas=$('#erdCanvas'), erdNodes=$('#erdNodes'), erdRels=$('#erdRelationships');
   const emptyState=$('#emptyState'), detailPanel=$('#detailPanel'), detailTitle=$('#detailTitle'), detailBody=$('#detailBody');
   const zoomLabel=$('#zoomLabel'), toast=$('#toast'), toastMsg=$('#toastMsg'), toastIcon=$('#toastIcon');
-  const detailLoading=$('#detailLoading');
 
   // ═══ INIT ═══
   async function init() {
-    const params = new URLSearchParams(window.location.search);
-    instanceUrl = params.get('instanceUrl')||''; sessionId = params.get('sessionId')||'';
+    // Preferred path: connection handed over via chrome.storage.session so the
+    // token never appears in the URL (history, session restore, other extensions).
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
+        const st = await chrome.storage.session.get('schelio_conn');
+        if (st && st.schelio_conn) {
+          instanceUrl = st.schelio_conn.instanceUrl || '';
+          sessionId = st.schelio_conn.sessionId || '';
+        }
+      }
+    } catch(e) { /* storage unavailable — fall back to URL params */ }
+    // Legacy fallback: URL params (manual/dev use) — strip the token immediately
+    if (!instanceUrl || !sessionId) {
+      const params = new URLSearchParams(window.location.search);
+      instanceUrl = params.get('instanceUrl')||''; sessionId = params.get('sessionId')||'';
+      if (sessionId) history.replaceState({}, '', location.pathname);
+    }
     if (!instanceUrl||!sessionId) { showLoadingError('Missing connection parameters.'); return; }
     // Normalize to my.salesforce.com for REST API compatibility
     instanceUrl = instanceUrl.replace(/\.lightning\.force\.com$/, '.my.salesforce.com')
@@ -81,6 +97,24 @@
     return sfApi('/services/data/'+SF_API_VERSION+'/tooling/query/?q='+encodeURIComponent(soql));
   }
 
+  // Follow nextRecordsUrl so results beyond the 2000-record page are not silently dropped
+  async function sfQueryAll(path) {
+    let data = await sfApi(path);
+    let records = data.records || [];
+    let guard = 0;
+    while (data && data.done === false && data.nextRecordsUrl && guard++ < 50) {
+      data = await sfApi(data.nextRecordsUrl);
+      records = records.concat(data.records || []);
+    }
+    return records;
+  }
+  async function sfRestQueryAll(soql) {
+    return sfQueryAll('/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(soql));
+  }
+  async function sfToolingQueryAll(soql) {
+    return sfQueryAll('/services/data/'+SF_API_VERSION+'/tooling/query/?q='+encodeURIComponent(soql));
+  }
+
   async function testConnection() { await sfApi('/services/data/'+SF_API_VERSION+'/'); }
 
   async function fetchObjectList() {
@@ -91,7 +125,7 @@
 
   async function fetchObjectDescribe(n) {
     if(objectMeta[n]) return objectMeta[n];
-    const d=await sfApi('/services/data/'+SF_API_VERSION+'/sobjects/'+n+'/describe/');
+    const d=await sfApi('/services/data/'+SF_API_VERSION+'/sobjects/'+encodeURIComponent(n)+'/describe/');
     objectMeta[n]=d; return d;
   }
 
@@ -141,10 +175,9 @@
   async function fetchLayouts(objectApi) {
     if (layoutCache[objectApi]) return layoutCache[objectApi];
     try {
-      const data = await sfToolingQuery(
+      layoutCache[objectApi] = await sfToolingQueryAll(
         "SELECT Id, Name, EntityDefinition.QualifiedApiName, TableEnumOrId FROM Layout WHERE TableEnumOrId = '"+escSoql(objectApi)+"'"
       );
-      layoutCache[objectApi] = data.records || [];
     } catch(e) {
       // Fallback: try describe layouts
       try {
@@ -161,11 +194,10 @@
   async function fetchFlexiPages(objectApi) {
     if (flexiPageCache[objectApi]) return flexiPageCache[objectApi];
     try {
-      const data = await sfToolingQuery(
+      flexiPageCache[objectApi] = await sfToolingQueryAll(
         "SELECT Id, DeveloperName, MasterLabel, Type, EntityDefinitionId, Description "+
         "FROM FlexiPage WHERE EntityDefinitionId = '"+escSoql(objectApi)+"' OR SobjectType = '"+escSoql(objectApi)+"'"
       );
-      flexiPageCache[objectApi] = data.records || [];
     } catch(e) {
       // FlexiPage query not supported for all objects — silent fallback
       flexiPageCache[objectApi] = [];
@@ -180,31 +212,25 @@
 
     try {
       // Object-level CRUD permissions per profile
-      const objData = await sfApi(
-        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
-          "SELECT Id, ParentId, Parent.Profile.Name, Parent.Label, SobjectType, "+
-          "PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, "+
-          "PermissionsViewAllRecords, PermissionsModifyAllRecords "+
-          "FROM ObjectPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
-          "AND Parent.IsOwnedByProfile = true ORDER BY Parent.Profile.Name"
-        )
+      result.objectPerms = await sfRestQueryAll(
+        "SELECT Id, ParentId, Parent.Profile.Name, Parent.Label, SobjectType, "+
+        "PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, "+
+        "PermissionsViewAllRecords, PermissionsModifyAllRecords "+
+        "FROM ObjectPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
+        "AND Parent.IsOwnedByProfile = true ORDER BY Parent.Profile.Name"
       );
-      result.objectPerms = objData.records || [];
     } catch(e) {
       console.warn('ObjectPermissions query failed', e);
     }
 
     try {
-      // Field-level security per profile
-      const flsData = await sfApi(
-        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
-          "SELECT Id, ParentId, Parent.Profile.Name, Parent.Label, SobjectType, Field, "+
-          "PermissionsRead, PermissionsEdit "+
-          "FROM FieldPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
-          "AND Parent.IsOwnedByProfile = true ORDER BY Parent.Profile.Name, Field"
-        )
+      // Field-level security per profile (paginated — often >2000 rows)
+      result.fieldPerms = await sfRestQueryAll(
+        "SELECT Id, ParentId, Parent.Profile.Name, Parent.Label, SobjectType, Field, "+
+        "PermissionsRead, PermissionsEdit "+
+        "FROM FieldPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
+        "AND Parent.IsOwnedByProfile = true ORDER BY Parent.Profile.Name, Field"
       );
-      result.fieldPerms = flsData.records || [];
     } catch(e) {
       console.warn('FieldPermissions query failed', e);
     }
@@ -244,11 +270,10 @@
   async function fetchLayoutAssignments(objectApi) {
     if (layoutAssignCache[objectApi]) return layoutAssignCache[objectApi];
     try {
-      const data = await sfToolingQuery(
+      const records = await sfToolingQueryAll(
         "SELECT Id, Layout.Name, ProfileId, Profile.Name, RecordTypeId, RecordType.Name "+
         "FROM ProfileLayout WHERE TableEnumOrId = '"+escSoql(objectApi)+"' ORDER BY Profile.Name"
       );
-      const records = data.records || [];
       // Merge into profileCache
       const profData = profileCache[objectApi];
       if (profData) {
@@ -285,16 +310,17 @@
     objectList.innerHTML=filtered.map(o=>{
       const sel=selectedObjects.has(o.name)?' selected':'';
       const badge=o.name.endsWith('__mdt')?'<span class="obj-badge mdt">MDT</span>':o.customSetting?'<span class="obj-badge setting">Setting</span>':o.custom?'<span class="obj-badge custom">Custom</span>':'<span class="obj-badge standard">Std</span>';
-      return '<div class="obj-item'+sel+'" data-api="'+o.name+'"><div class="obj-check"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="obj-info"><div class="obj-label">'+o.label+'</div><div class="obj-api">'+o.name+'</div></div>'+badge+'</div>';
+      return '<div class="obj-item'+sel+'" data-api="'+escHtml(o.name)+'"><div class="obj-check"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="obj-info"><div class="obj-label">'+escHtml(o.label)+'</div><div class="obj-api">'+escHtml(o.name)+'</div></div>'+badge+'</div>';
     }).join('');
+    // NOTE: the shift-click anchor must survive re-renders (toggleObject re-renders
+    // the list, which would reset a local variable) — hence module-scoped.
     const items=objectList.querySelectorAll('.obj-item');
-    let lastClickedIdx=-1;
     items.forEach((el,idx)=>el.addEventListener('click',async(e)=>{
-      if(e.shiftKey&&lastClickedIdx>=0){
-        const start=Math.min(lastClickedIdx,idx),end=Math.max(lastClickedIdx,idx);
-        for(let i=start;i<=end;i++){const api=items[i].dataset.api;if(!selectedObjects.has(api))await toggleObject(api);}
+      if(e.shiftKey&&sidebarAnchorIdx>=0){
+        const start=Math.min(sidebarAnchorIdx,idx),end=Math.max(sidebarAnchorIdx,idx);
+        for(let i=start;i<=end;i++){const api=items[i].dataset.api;if(api&&!selectedObjects.has(api))await toggleObject(api);}
       } else { await toggleObject(el.dataset.api); }
-      lastClickedIdx=idx;
+      sidebarAnchorIdx=idx;
     }));
   }
 
@@ -321,7 +347,7 @@
     results.sort((a,b)=>{const ae=a.field.name.toLowerCase()===q;const be=b.field.name.toLowerCase()===q;if(ae&&!be)return-1;if(!ae&&be)return 1;return a.objLabel.localeCompare(b.objLabel);});
     fieldResults.innerHTML=results.slice(0,50).map(r=>{
       const icon=FIELD_ICONS[r.field.type]||FIELD_ICONS.default;
-      return '<div class="field-result-item" data-obj="'+r.objName+'"><div class="field-result-obj">'+r.objLabel+'</div><div class="field-result-name">'+icon+' '+hl(r.field.label,q)+'</div><div class="field-result-meta">'+hl(r.field.name,q)+' · '+r.field.type+(r.field.referenceTo?' → '+r.field.referenceTo.join(', '):'')+'</div></div>';
+      return '<div class="field-result-item" data-obj="'+escHtml(r.objName)+'"><div class="field-result-obj">'+escHtml(r.objLabel)+'</div><div class="field-result-name">'+icon+' '+hl(r.field.label,q)+'</div><div class="field-result-meta">'+hl(r.field.name,q)+' · '+escHtml(r.field.type)+(r.field.referenceTo?' → '+escHtml(r.field.referenceTo.join(', ')):'')+'</div></div>';
     }).join('');
     if(results.length>50) fieldResults.insertAdjacentHTML('beforeend','<div class="empty-tab-msg" style="color:var(--accent-amber)">Showing 50 of '+results.length+' results — refine your search</div>');
     if(!results.length) fieldResults.innerHTML='<div class="empty-tab-msg">No fields found across '+Object.keys(objectMeta).length+' loaded objects.<br>Select more objects from the sidebar first.</div>';
@@ -329,7 +355,7 @@
       const obj=el.dataset.obj; if(!selectedObjects.has(obj)) toggleObject(obj); showDetail(obj);
     }));
   }
-  function hl(text,q){const i=text.toLowerCase().indexOf(q);if(i===-1)return text;return text.slice(0,i)+'<span class="field-result-highlight">'+text.slice(i,i+q.length)+'</span>'+text.slice(i+q.length);}
+  function hl(text,q){const i=text.toLowerCase().indexOf(q);if(i===-1)return escHtml(text);return escHtml(text.slice(0,i))+'<span class="field-result-highlight">'+escHtml(text.slice(i,i+q.length))+'</span>'+escHtml(text.slice(i+q.length));}
 
   // ═══ SAVE / LOAD ═══
   function saveLayout() {
@@ -342,8 +368,12 @@
     if(!saved){showToast('No saved layout','⚠️');return;}
     try{
       const L=JSON.parse(saved); showToast('Loading…','⏳');
+      pushUndo();
       selectedObjects=new Set(L.selectedObjects); nodePositions=L.nodePositions||{}; zoom=L.zoom||1; panX=L.panX||0; panY=L.panY||0;
-      for(const o of L.selectedObjects){try{await fetchObjectDescribe(o);}catch(e){console.warn('Failed to describe '+o,e);}}
+      for(const o of L.selectedObjects){
+        try{await fetchObjectDescribe(o);}catch(e){console.warn('Failed to describe '+o,e);}
+        if(!nodePositions[o]) assignPosition(o);
+      }
       renderObjectList();buildRelationships();renderERD();updateEmptyState();applyTransform();
       showToast('Restored '+L.selectedObjects.length+' objects','✓');
     }catch(e){showToast('Load failed','⚠️');}
@@ -473,7 +503,9 @@
       const input=$('#overviewFieldSearch');
       if(input) input.addEventListener('input',()=>{
         const q=input.value.toLowerCase().trim();
-        document.querySelectorAll('#dtabOverview .detail-field-row').forEach(row=>{
+        // [data-field-api] scopes the filter to field rows — Relationships rows
+        // have no data attributes and must stay visible
+        document.querySelectorAll('#dtabOverview .detail-field-row[data-field-api]').forEach(row=>{
           const match=!q||(row.dataset.fieldLabel||'').includes(q)||(row.dataset.fieldApi||'').includes(q);
           row.classList.toggle('hidden',!match);
           const next=row.nextElementSibling;
@@ -511,8 +543,11 @@
         "FROM EntityDefinition WHERE QualifiedApiName = '"+escSoql(objectApi)+"'"
       );
       sharingModelCache[objectApi]=(d.records&&d.records[0])||null;
-    } catch(e) { sharingModelCache[objectApi]=null; }
-    return sharingModelCache[objectApi];
+      return sharingModelCache[objectApi];
+    } catch(e) {
+      // Transient failure: don't cache, allow a retry on next open
+      return null;
+    }
   }
   function formatSharing(v){
     const map={ReadWrite:'Public Read/Write',Read:'Public Read Only',Private:'Private',ControlledByParent:'Controlled by Parent',FullAccess:'Public Full Access',ReadWriteTransfer:'Public Read/Write/Transfer',ReadSelect:'Use'};
@@ -543,8 +578,8 @@
       if (rt.defaultRecordTypeMapping) badges += '<span class="rt-badge default">Default</span> ';
 
       h += '<div class="rt-card">';
-      h += '<div class="rt-card-header"><div><div class="rt-card-name">'+rt.name+'</div><div class="rt-card-api">'+rt.developerName+'</div></div><div>'+badges+'</div></div>';
-      h += '<div class="rt-meta"><span>ID: '+rt.recordTypeId+'</span></div>';
+      h += '<div class="rt-card-header"><div><div class="rt-card-name">'+escHtml(rt.name)+'</div><div class="rt-card-api">'+escHtml(rt.developerName)+'</div></div><div>'+badges+'</div></div>';
+      h += '<div class="rt-meta"><span>ID: '+escHtml(rt.recordTypeId)+'</span></div>';
       h += '</div>';
     });
 
@@ -566,8 +601,9 @@
   }
 
   function decodeValidFor(encoded) {
-    const decoded = atob(encoded);
     const indices = new Set();
+    let decoded;
+    try { decoded = atob(encoded); } catch(e) { return indices; }
     for (let byteIdx = 0; byteIdx < decoded.length; byteIdx++) {
       const byte = decoded.charCodeAt(byteIdx);
       for (let bit = 0; bit < 8; bit++) {
@@ -582,11 +618,14 @@
     const dependentField = meta.fields.find(f => f.name === dependentName);
     if (!controllerField || !dependentField) return {};
 
-    const controllerValues = (controllerField.picklistValues || []).filter(v => v.active);
+    // IMPORTANT: the validFor bitmap indexes the controlling field's picklistValues
+    // array AS RETURNED BY DESCRIBE, inactive entries included. Filtering before
+    // indexing shifts every mapping after an inactive value onto the wrong parent.
+    const controllerAll = controllerField.picklistValues || [];
     const dependentValues = (dependentField.picklistValues || []).filter(v => v.active);
     const matrix = {};
 
-    controllerValues.forEach((cv, idx) => { matrix[cv.value] = []; });
+    controllerAll.forEach(cv => { if (cv.active) matrix[cv.value] = []; });
 
     // Method 1: use validFor bitstring from describe API
     let hasValidFor = false;
@@ -595,10 +634,8 @@
         hasValidFor = true;
         const validIndices = decodeValidFor(dv.validFor);
         validIndices.forEach(idx => {
-          if (idx < controllerValues.length) {
-            const cv = controllerValues[idx].value;
-            if (matrix[cv]) matrix[cv].push({ label: dv.label, value: dv.value });
-          }
+          const cv = controllerAll[idx];
+          if (cv && cv.active && matrix[cv.value]) matrix[cv.value].push({ label: dv.label, value: dv.value });
         });
       }
     });
@@ -690,16 +727,26 @@
   function exportAllDepsCsv() {
     const selected = [...selectedObjects];
     if (!selected.length) { showToast('Select objects first', '⚠️'); return; }
-    let all = '', total = 0, objectsWithDeps = 0;
+    let all = '', total = 0, objectsWithDeps = 0, objectsWithDepFields = 0, skipped = 0;
     selected.forEach(api => {
       const meta = objectMeta[api];
       if (!meta) return;
-      const { rows, count } = buildDepsCsvRows(meta);
-      if (count) { all += rows; total += count; objectsWithDeps++; }
+      if (!Object.keys(buildPicklistDependencies(meta).dependent).length) return;
+      objectsWithDepFields++;
+      try {
+        const { rows, count } = buildDepsCsvRows(meta);
+        if (count) { all += rows; total += count; objectsWithDeps++; }
+        else skipped++;
+      } catch(e) { console.warn('Deps export failed for '+api, e); skipped++; }
     });
-    if (!total) { showToast('No dependent picklists found in selected objects', '⚠️'); return; }
+    if (!total) {
+      if (!objectsWithDepFields) showToast('No dependent picklists in the selected objects', '⚠️');
+      else showToast('Dependent picklists exist but no mapping data — open those objects in the detail panel first', '⚠️');
+      return;
+    }
     downloadCsv(DEPS_CSV_HEADER + all, 'schelio-picklist-dependencies.csv');
-    showToast('Exported ' + total + ' mappings from ' + objectsWithDeps + ' object(s)', '📊');
+    if (skipped) showToast('Exported ' + total + ' mappings from ' + objectsWithDeps + ' of ' + objectsWithDepFields + ' object(s) — ' + skipped + ' skipped (no mapping data)', '📊');
+    else showToast('Exported ' + total + ' mappings from ' + objectsWithDeps + ' object(s)', '📊');
   }
 
   function buildDepChains(deps) {
@@ -743,7 +790,7 @@
           const f = meta.fields.find(ff => ff.name === fieldApi);
           const label = f ? f.label : fieldApi;
           const isPicklist = f && (f.type === 'picklist' || f.type === 'multipicklist');
-          h += '<span class="pl-dep-node'+(isPicklist ? '' : ' pl-dep-node-checkbox')+'" title="'+fieldApi+'">'+label+'</span>';
+          h += '<span class="pl-dep-node'+(isPicklist ? '' : ' pl-dep-node-checkbox')+'" title="'+escHtml(fieldApi)+'">'+escHtml(label)+'</span>';
           if (i < chain.length - 1) h += '<span class="pl-dep-arrow">→</span>';
         });
         h += '</div>';
@@ -771,17 +818,17 @@
       h += '<div class="pl-accordion'+(isControlling?' pl-controlling':'')+(isDep?' pl-dependent':'')+'" data-pl="'+field.name+'">';
       h += '<div class="pl-accordion-header">';
       h += '<span class="pl-accordion-arrow">▶</span>';
-      h += '<span class="pl-accordion-title">'+(FIELD_ICONS[field.type]||'📋')+' '+field.label+'</span>';
+      h += '<span class="pl-accordion-title">'+(FIELD_ICONS[field.type]||'📋')+' '+escHtml(field.label)+'</span>';
 
       // Dependency badges
       if (isControlling) {
         const depLabels = deps.controlling[field.name].map(d => { const f = meta.fields.find(ff=>ff.name===d); return f?f.label:d; });
-        h += '<span class="pl-dep-badge pl-dep-badge-ctrl" title="Controls: '+depLabels.join(', ')+'">Controls '+depLabels.join(', ')+'</span>';
+        h += '<span class="pl-dep-badge pl-dep-badge-ctrl" title="Controls: '+escHtml(depLabels.join(', '))+'">Controls '+escHtml(depLabels.join(', '))+'</span>';
       }
       if (isDep) {
         const ctrlField = meta.fields.find(f => f.name === deps.dependent[field.name]);
         const ctrlLabel = ctrlField ? ctrlField.label : deps.dependent[field.name];
-        h += '<span class="pl-dep-badge pl-dep-badge-dep" title="Depends on: '+ctrlLabel+'">Depends on '+ctrlLabel+'</span>';
+        h += '<span class="pl-dep-badge pl-dep-badge-dep" title="Depends on: '+escHtml(ctrlLabel)+'">Depends on '+escHtml(ctrlLabel)+'</span>';
       }
 
       h += '<span class="pl-accordion-count">'+totalValues.size+' values</span>';
@@ -796,23 +843,24 @@
         const ctrlLabel = ctrlField ? ctrlField.label : deps.dependent[field.name];
         const ctrlValues = Object.keys(matrix).filter(k => matrix[k].length > 0);
 
-        h += '<div class="pl-dep-matrix" data-dep-field="'+field.name+'">';
-        h += '<div class="pl-dep-matrix-label">Select a '+ctrlLabel+' value to filter:</div>';
+        h += '<div class="pl-dep-matrix" data-dep-field="'+escHtml(field.name)+'">';
+        h += '<div class="pl-dep-matrix-label">Select a '+escHtml(ctrlLabel)+' value to filter:</div>';
         h += '<div class="pl-dep-ctrl-values">';
         h += '<span class="pl-dep-ctrl-val active-filter" data-ctrl-val="__all__">All</span>';
         ctrlValues.forEach(cv => {
           const count = matrix[cv].length;
-          h += '<span class="pl-dep-ctrl-val" data-ctrl-val="'+cv+'" title="'+count+' dependent values">'+cv+'</span>';
+          h += '<span class="pl-dep-ctrl-val" data-ctrl-val="'+escHtml(cv)+'" title="'+count+' dependent values">'+escHtml(cv)+'</span>';
         });
         h += '</div>';
-        h += '<div class="pl-dep-values" data-dep-target="'+field.name+'">';
+        h += '<div class="pl-dep-values" data-dep-target="'+escHtml(field.name)+'">';
         // Show all values initially
         const allDepValues = new Map();
         Object.entries(matrix).forEach(([cv, dvs]) => {
           dvs.forEach(dv => { if (!allDepValues.has(dv.value)) allDepValues.set(dv.value, { label: dv.label, controllers: [] }); allDepValues.get(dv.value).controllers.push(cv); });
         });
         allDepValues.forEach((info, val) => {
-          h += '<span class="pl-value pl-dep-val" data-dep-val="'+val+'" data-controllers="'+info.controllers.join('||')+'" title="'+val+' (available for: '+info.controllers.join(', ')+')">'+info.label+'</span>';
+          // controllers stored as JSON (a picklist value may itself contain "||")
+          h += '<span class="pl-value pl-dep-val" data-dep-val="'+escHtml(val)+'" data-controllers="'+escHtml(JSON.stringify(info.controllers))+'" title="'+escHtml(val+' (available for: '+info.controllers.join(', ')+')')+'">'+escHtml(info.label)+'</span>';
         });
         if (!allDepValues.size) h += '<span style="color:var(--text-faint);font-size:11px">No dependency data available</span>';
         h += '</div></div>';
@@ -822,8 +870,7 @@
         values.forEach(v => {
           let cls = 'pl-value';
           if (v.isDefault) cls += ' default-val';
-          if (isControlling) cls += ' pl-ctrl-clickable';
-          h += '<span class="'+cls+'" title="'+v.value+'">'+v.label+'</span>';
+          h += '<span class="'+cls+'" title="'+escHtml(v.value)+'">'+escHtml(v.label)+'</span>';
         });
         if (!values.length) h += '<span style="color:var(--text-faint);font-size:11px">No values</span>';
         h += '</div>';
@@ -831,13 +878,12 @@
         rtEntries.forEach(([rtId, rt]) => {
           const values = rt.fields[field.name] || [];
           h += '<div class="pl-rt-group">';
-          h += '<div class="pl-rt-label">'+rt.name+' ('+values.length+')</div>';
+          h += '<div class="pl-rt-label">'+escHtml(rt.name)+' ('+values.length+')</div>';
           h += '<div class="pl-value-list">';
           values.forEach(v => {
             let cls = 'pl-value';
             if (v.isDefault) cls += ' default-val';
-            if (isControlling) cls += ' pl-ctrl-clickable';
-            h += '<span class="'+cls+'" title="'+v.value+'">'+v.label+'</span>';
+            h += '<span class="'+cls+'" title="'+escHtml(v.value)+'">'+escHtml(v.label)+'</span>';
           });
           if (!values.length) h += '<span style="color:var(--text-faint);font-size:11px">No values for this RT</span>';
           h += '</div></div>';
@@ -876,7 +922,8 @@
           if (ctrlVal === '__all__') {
             v.classList.remove('filtered-out');
           } else {
-            const controllers = v.dataset.controllers.split('||');
+            let controllers = [];
+            try { controllers = JSON.parse(v.dataset.controllers || '[]'); } catch(err) {}
             v.classList.toggle('filtered-out', !controllers.includes(ctrlVal));
           }
         });
@@ -893,8 +940,8 @@
       layouts.forEach(l => {
         h += '<div class="layout-card"><div class="layout-card-header">';
         h += '<span class="layout-card-icon">📐</span>';
-        h += '<div class="layout-card-info"><div class="layout-card-name">'+(l.Name||l.name||'Unnamed')+'</div>';
-        h += '<div class="layout-card-type">ID: '+(l.Id||l.id||'—')+'</div></div>';
+        h += '<div class="layout-card-info"><div class="layout-card-name">'+escHtml(l.Name||l.name||'Unnamed')+'</div>';
+        h += '<div class="layout-card-type">ID: '+escHtml(l.Id||l.id||'—')+'</div></div>';
         h += '</div></div>';
       });
     } else {
@@ -908,11 +955,11 @@
         const typeLabel = fp.Type === 'RecordPage' ? '⚡ Record Page' : fp.Type === 'AppPage' ? '📱 App Page' : fp.Type || 'Page';
         h += '<div class="layout-card"><div class="layout-card-header">';
         h += '<span class="layout-card-icon">⚡</span>';
-        h += '<div class="layout-card-info"><div class="layout-card-name">'+(fp.MasterLabel||fp.DeveloperName)+'</div>';
-        h += '<div class="layout-card-type">'+typeLabel+' · '+fp.DeveloperName+'</div></div>';
+        h += '<div class="layout-card-info"><div class="layout-card-name">'+escHtml(fp.MasterLabel||fp.DeveloperName)+'</div>';
+        h += '<div class="layout-card-type">'+typeLabel+' · '+escHtml(fp.DeveloperName)+'</div></div>';
         h += '</div>';
         if (fp.Description) {
-          h += '<div class="layout-card-body"><div class="layout-assignment"><span>'+fp.Description+'</span></div></div>';
+          h += '<div class="layout-card-body"><div class="layout-assignment"><span>'+escHtml(fp.Description)+'</span></div></div>';
         }
         h += '</div>';
       });
@@ -929,8 +976,8 @@
         // Find matching layout name if possible
         const layoutMatch = layouts.find(l => (l.Name||l.name||'').includes(rt.name));
         h += '<div class="layout-assignment">';
-        h += '<span class="layout-assignment-label">'+rt.name+'</span>';
-        h += '<span>→ '+(layoutMatch ? (layoutMatch.Name||layoutMatch.name) : 'Default Layout')+'</span>';
+        h += '<span class="layout-assignment-label">'+escHtml(rt.name)+'</span>';
+        h += '<span>→ '+escHtml(layoutMatch ? (layoutMatch.Name||layoutMatch.name) : 'Default Layout')+'</span>';
         h += '</div>';
       });
       h += '</div></div>';
@@ -956,10 +1003,10 @@
     profileNames.forEach(pName => {
       const p = profiles[pName];
 
-      h += '<div class="profile-accordion" data-profile="'+pName+'">';
+      h += '<div class="profile-accordion" data-profile="'+escHtml(pName)+'">';
       h += '<div class="profile-accordion-header">';
       h += '<span class="profile-accordion-arrow">▶</span>';
-      h += '<span class="profile-accordion-name">👤 '+pName+'</span>';
+      h += '<span class="profile-accordion-name">👤 '+escHtml(pName)+'</span>';
       // Quick CRUD summary
       if (p.crud) {
         const crudCount = [p.crud.read,p.crud.create,p.crud.edit,p.crud.delete].filter(Boolean).length;
@@ -987,9 +1034,9 @@
         h += '<div class="profile-sub-title">Layout Assignments</div>';
         p.layouts.forEach(la => {
           h += '<div class="profile-layout-row">';
-          h += '<span class="profile-layout-rt">'+la.recordTypeName+'</span>';
+          h += '<span class="profile-layout-rt">'+escHtml(la.recordTypeName)+'</span>';
           h += '<span style="color:var(--text-faint)">→</span>';
-          h += '<span class="profile-layout-name">'+la.layoutName+'</span>';
+          h += '<span class="profile-layout-name">'+escHtml(la.layoutName)+'</span>';
           h += '</div>';
         });
       }
@@ -1000,12 +1047,12 @@
 
         // Filter buttons
         h += '<div class="fls-filter">';
-        h += '<button class="fls-filter-btn active" data-fls-filter="all" data-profile="'+pName+'">All</button>';
-        h += '<button class="fls-filter-btn" data-fls-filter="restricted" data-profile="'+pName+'">Restricted</button>';
-        h += '<button class="fls-filter-btn" data-fls-filter="readonly" data-profile="'+pName+'">Read Only</button>';
+        h += '<button class="fls-filter-btn active" data-fls-filter="all" data-profile="'+escHtml(pName)+'">All</button>';
+        h += '<button class="fls-filter-btn" data-fls-filter="restricted" data-profile="'+escHtml(pName)+'">Restricted</button>';
+        h += '<button class="fls-filter-btn" data-fls-filter="readonly" data-profile="'+escHtml(pName)+'">Read Only</button>';
         h += '</div>';
 
-        h += '<table class="fls-table" data-fls-profile="'+pName+'">';
+        h += '<table class="fls-table" data-fls-profile="'+escHtml(pName)+'">';
         h += '<thead><tr><th>Field</th><th>Label</th><th style="text-align:center">Read</th><th style="text-align:center">Edit</th></tr></thead>';
         h += '<tbody>';
 
@@ -1017,8 +1064,8 @@
           const restricted = !fls.read || !fls.edit;
           const readonly = fls.read && !fls.edit;
           h += '<tr data-fls-restricted="'+(restricted?'1':'0')+'" data-fls-readonly="'+(readonly?'1':'0')+'">';
-          h += '<td>'+fls.field+'</td>';
-          h += '<td style="color:var(--text-secondary);font-family:var(--font-sans)">'+label+'</td>';
+          h += '<td>'+escHtml(fls.field)+'</td>';
+          h += '<td style="color:var(--text-secondary);font-family:var(--font-sans)">'+escHtml(label)+'</td>';
           h += '<td style="text-align:center"><span class="fls-icon '+(fls.read?'yes':'no')+'">'+(fls.read?'✓':'✕')+'</span></td>';
           h += '<td style="text-align:center"><span class="fls-icon '+(fls.edit?'yes':'no')+'">'+(fls.edit?'✓':'✕')+'</span></td>';
           h += '</tr>';
@@ -1047,7 +1094,7 @@
         btn.parentElement.querySelectorAll('.fls-filter-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         // Filter rows
-        const table = document.querySelector('.fls-table[data-fls-profile="'+pName+'"]');
+        const table = document.querySelector('.fls-table[data-fls-profile="'+CSS.escape(pName)+'"]');
         if (!table) return;
         table.querySelectorAll('tbody tr').forEach(row => {
           if (filter === 'all') { row.style.display = ''; }
@@ -1066,6 +1113,7 @@
   function exportPdfSpec() {
     const selected=[...selectedObjects];
     if(!selected.length){showToast('Select objects first','⚠️');return;}
+    const E=escHtml; // every org-metadata value below MUST go through E()
     const now=new Date();
     const dateStr=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
     const orgName=escHtml(instanceUrl.replace('https://','').replace('.my.salesforce.com','').replace('.lightning.force.com',''));
@@ -1080,13 +1128,13 @@
       const customFields=fields.filter(f=>f.custom);
       const rts=(meta.recordTypeInfos||[]).filter(r=>!r.master&&r.active);
 
-      objectSections+=`<div class="spec-object ${idx>0?'page-break':''}"><h2><span class="obj-num">${idx+1}</span>${meta.label}<span class="obj-type-badge ${meta.custom?'custom':'standard'}">${meta.custom?'Custom':'Standard'}</span></h2>
-      <div class="spec-meta-grid"><div class="meta-item"><span class="meta-label">API Name</span><span class="meta-value mono">${meta.name}</span></div><div class="meta-item"><span class="meta-label">Key Prefix</span><span class="meta-value mono">${meta.keyPrefix||'—'}</span></div><div class="meta-item"><span class="meta-label">Total Fields</span><span class="meta-value">${fields.length}</span></div><div class="meta-item"><span class="meta-label">Custom Fields</span><span class="meta-value">${customFields.length}</span></div><div class="meta-item"><span class="meta-label">Required</span><span class="meta-value">${requiredFields.length}</span></div><div class="meta-item"><span class="meta-label">Relationships</span><span class="meta-value">${refFields.length}</span></div><div class="meta-item"><span class="meta-label">Record Types</span><span class="meta-value">${rts.length}</span></div><div class="meta-item"><span class="meta-label">Searchable</span><span class="meta-value">${meta.searchable?'Yes':'No'}</span></div></div>`;
+      objectSections+=`<div class="spec-object ${idx>0?'page-break':''}"><h2><span class="obj-num">${idx+1}</span>${E(meta.label)}<span class="obj-type-badge ${meta.custom?'custom':'standard'}">${meta.custom?'Custom':'Standard'}</span></h2>
+      <div class="spec-meta-grid"><div class="meta-item"><span class="meta-label">API Name</span><span class="meta-value mono">${E(meta.name)}</span></div><div class="meta-item"><span class="meta-label">Key Prefix</span><span class="meta-value mono">${E(meta.keyPrefix||'—')}</span></div><div class="meta-item"><span class="meta-label">Total Fields</span><span class="meta-value">${fields.length}</span></div><div class="meta-item"><span class="meta-label">Custom Fields</span><span class="meta-value">${customFields.length}</span></div><div class="meta-item"><span class="meta-label">Required</span><span class="meta-value">${requiredFields.length}</span></div><div class="meta-item"><span class="meta-label">Relationships</span><span class="meta-value">${refFields.length}</span></div><div class="meta-item"><span class="meta-label">Record Types</span><span class="meta-value">${rts.length}</span></div><div class="meta-item"><span class="meta-label">Searchable</span><span class="meta-value">${meta.searchable?'Yes':'No'}</span></div></div>`;
 
       // Record Types table
       if(rts.length){
         objectSections+=`<h3>Record Types</h3><table><thead><tr><th>Name</th><th>Developer Name</th><th>ID</th><th>Default</th></tr></thead><tbody>`;
-        rts.forEach(rt=>{objectSections+=`<tr><td>${rt.name}</td><td class="mono">${rt.developerName}</td><td class="mono">${rt.recordTypeId}</td><td class="center">${rt.defaultRecordTypeMapping?'●':''}</td></tr>`;});
+        rts.forEach(rt=>{objectSections+=`<tr><td>${E(rt.name)}</td><td class="mono">${E(rt.developerName)}</td><td class="mono">${E(rt.recordTypeId)}</td><td class="center">${rt.defaultRecordTypeMapping?'●':''}</td></tr>`;});
         objectSections+=`</tbody></table>`;
       }
 
@@ -1096,16 +1144,16 @@
       if (plData && plFields.length) {
         objectSections += '<h3>Picklist Values</h3>';
         plFields.forEach(f => {
-          objectSections += '<p style="font-weight:600;margin:8px 0 4px">'+f.label+' <span class="mono" style="font-weight:400;color:#94A3B8">('+f.name+')</span></p>';
+          objectSections += '<p style="font-weight:600;margin:8px 0 4px">'+E(f.label)+' <span class="mono" style="font-weight:400;color:#94A3B8">('+E(f.name)+')</span></p>';
           const rtEntries = Object.entries(plData);
           if (rtEntries.length <= 1) {
             const values = rtEntries[0] ? (rtEntries[0][1].fields[f.name]||[]) : [];
-            objectSections += '<p class="mono" style="font-size:9px;color:#475569">'+values.map(v=>v.label).join(' · ')+'</p>';
+            objectSections += '<p class="mono" style="font-size:9px;color:#475569">'+E(values.map(v=>v.label).join(' · '))+'</p>';
           } else {
             objectSections += '<table><thead><tr><th>Record Type</th><th>Values</th></tr></thead><tbody>';
             rtEntries.forEach(([rtId,rt])=>{
               const vals = rt.fields[f.name]||[];
-              objectSections += '<tr><td>'+rt.name+'</td><td class="mono" style="font-size:9px">'+vals.map(v=>v.label).join(' · ')+'</td></tr>';
+              objectSections += '<tr><td>'+E(rt.name)+'</td><td class="mono" style="font-size:9px">'+E(vals.map(v=>v.label).join(' · '))+'</td></tr>';
             });
             objectSections += '</tbody></table>';
           }
@@ -1114,19 +1162,19 @@
 
       if(refFields.length){
         objectSections+=`<h3>Relationships</h3><table><thead><tr><th>Field</th><th>API Name</th><th>References</th><th>Type</th></tr></thead><tbody>`;
-        refFields.forEach(f=>{const t=f.cascadeDelete?'Master-Detail':'Lookup';objectSections+=`<tr><td>${f.label}</td><td class="mono">${f.name}</td><td class="mono">${(f.referenceTo||[]).join(', ')}</td><td><span class="rel-badge ${t==='Master-Detail'?'md':'lk'}">${t}</span></td></tr>`;});
+        refFields.forEach(f=>{const t=f.cascadeDelete?'Master-Detail':'Lookup';objectSections+=`<tr><td>${E(f.label)}</td><td class="mono">${E(f.name)}</td><td class="mono">${E((f.referenceTo||[]).join(', '))}</td><td><span class="rel-badge ${t==='Master-Detail'?'md':'lk'}">${t}</span></td></tr>`;});
         objectSections+=`</tbody></table>`;
       }
       objectSections+=`<h3>Field Dictionary</h3><table><thead><tr><th>#</th><th>Label</th><th>API Name</th><th>Type</th><th>Length</th><th>Req</th><th>Custom</th></tr></thead><tbody>`;
-      fields.forEach((f,i)=>{objectSections+=`<tr class="${f.type==='reference'?'row-ref':''}"><td class="center">${i+1}</td><td>${f.label}</td><td class="mono">${f.name}</td><td class="mono">${f.type}${f.type==='reference'?' → '+(f.referenceTo||[]).join(', '):''}</td><td class="center">${f.length||f.precision||'—'}</td><td class="center">${f.nillable?'':'●'}</td><td class="center">${f.custom?'●':''}</td></tr>`;});
+      fields.forEach((f,i)=>{objectSections+=`<tr class="${f.type==='reference'?'row-ref':''}"><td class="center">${i+1}</td><td>${E(f.label)}</td><td class="mono">${E(f.name)}</td><td class="mono">${E(f.type)}${f.type==='reference'?' → '+E((f.referenceTo||[]).join(', ')):''}</td><td class="center">${E(f.length||f.precision||'—')}</td><td class="center">${f.nillable?'':'●'}</td><td class="center">${f.custom?'●':''}</td></tr>`;});
       objectSections+=`</tbody></table></div>`;
     });
 
     let erdSummary='';
     if(relationships.length){
       erdSummary=`<div class="spec-object page-break"><h2><span class="obj-num">☆</span>Relationship Map</h2><table><thead><tr><th>From</th><th>Field</th><th>To</th><th>Type</th></tr></thead><tbody>`;
-      relationships.forEach(r=>{erdSummary+=`<tr><td class="mono">${r.from}</td><td class="mono">${r.field}</td><td class="mono">${r.to}</td><td><span class="rel-badge ${r.type==='master-detail'?'md':'lk'}">${r.type}</span></td></tr>`;});
-      erdSummary+=`</tbody></table><h3>Mermaid ERD Code</h3><pre class="mermaid-block">${generateMermaid()}</pre></div>`;
+      relationships.forEach(r=>{erdSummary+=`<tr><td class="mono">${E(r.from)}</td><td class="mono">${E(r.field)}</td><td class="mono">${E(r.to)}</td><td><span class="rel-badge ${r.type==='master-detail'?'md':'lk'}">${r.type}</span></td></tr>`;});
+      erdSummary+=`</tbody></table><h3>Mermaid ERD Code</h3><pre class="mermaid-block">${E(generateMermaid())}</pre></div>`;
     }
 
     const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Technical Spec — ${orgName}</title>
@@ -1151,11 +1199,14 @@ table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px}thea
 <div class="cover"><h1>Technical Data Model<br>Specification</h1><div class="subtitle">Salesforce Org Schema Documentation</div>
 <div class="meta-line">Org: ${orgName}</div><div class="meta-line">Objects: ${selected.length} · Fields: ${totalFields} · Relationships: ${relationships.length}</div><div class="meta-line">Generated: ${dateStr}</div>
 <div class="meta-line" style="margin-top:20px;color:#475569">Generated by Schelio</div></div>
-<div class="toc"><h2>Table of Contents</h2>${selected.map((api,i)=>{const m=objectMeta[api];return '<div class="toc-item"><span class="toc-num">'+(i+1)+'</span><span class="toc-label">'+(m?.label||api)+'</span><span class="toc-api">'+api+'</span></div>';}).join('')}${relationships.length?'<div class="toc-item"><span class="toc-num">☆</span><span class="toc-label">Relationship Map</span><span class="toc-api">Cross-object relationships & Mermaid ERD</span></div>':''}</div>
+<div class="toc"><h2>Table of Contents</h2>${selected.map((api,i)=>{const m=objectMeta[api];return '<div class="toc-item"><span class="toc-num">'+(i+1)+'</span><span class="toc-label">'+E(m?.label||api)+'</span><span class="toc-api">'+E(api)+'</span></div>';}).join('')}${relationships.length?'<div class="toc-item"><span class="toc-num">☆</span><span class="toc-label">Relationship Map</span><span class="toc-api">Cross-object relationships & Mermaid ERD</span></div>':''}</div>
 ${objectSections}${erdSummary}
-<div class="spec-footer">Generated by Schelio · ${dateStr} · ${instanceUrl}</div></body></html>`;
+<div class="spec-footer">Generated by Schelio · ${dateStr} · ${E(instanceUrl)}</div></body></html>`;
 
-    const w=window.open('','_blank');w.document.write(html);w.document.close();
+    const w=window.open('','_blank');
+    if(!w){showToast('Popup blocked — allow popups to export the PDF spec','⚠️');return;}
+    w.opener=null; // sever the reference back to the app page (defense in depth)
+    w.document.write(html);w.document.close();
     showToast('PDF spec opened — use Save as PDF','📄');
   }
 
@@ -1268,8 +1319,10 @@ ${objectSections}${erdSummary}
     div.innerHTML=h;
     div.style.left=screenX+'px';div.style.top=(screenY+16)+'px';
     document.body.appendChild(div);
-    // Auto-close
-    const close=()=>{div.remove();document.removeEventListener('click',close);};
+    // Auto-close — drop any close listener left over from a previous tooltip
+    if(relTooltipClose){document.removeEventListener('click',relTooltipClose);relTooltipClose=null;}
+    const close=()=>{div.remove();document.removeEventListener('click',close);if(relTooltipClose===close)relTooltipClose=null;};
+    relTooltipClose=close;
     setTimeout(()=>document.addEventListener('click',close),50);
   }
 
@@ -1353,8 +1406,43 @@ ${objectSections}${erdSummary}
   }
   function fitAll(){if(!selectedObjects.size)return;let mx=Infinity,my=Infinity,Mx=-Infinity,My=-Infinity;selectedObjects.forEach(a=>{const p=nodePositions[a];if(!p)return;mx=Math.min(mx,p.x);my=Math.min(my,p.y);Mx=Math.max(Mx,p.x+CARD_WIDTH);My=Math.max(My,p.y+300);});const r=erdCanvas.getBoundingClientRect();const cw=Mx-mx+100,ch=My-my+100;zoom=Math.max(0.2,Math.min(r.width/cw,r.height/ch,1.5));panX=(r.width-cw*zoom)/2-mx*zoom+50;panY=(r.height-ch*zoom)/2-my*zoom+50;applyTransform();}
 
-  function exportPng(){const b=new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'});const u=URL.createObjectURL(b);const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=erdCanvas.clientWidth*2;c.height=erdCanvas.clientHeight*2;const ctx=c.getContext('2d');ctx.fillStyle='#060D1B';ctx.fillRect(0,0,c.width,c.height);ctx.scale(2,2);ctx.drawImage(img,0,0);URL.revokeObjectURL(u);c.toBlob(bl=>{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download='schelio-erd.png';a.click();});};img.src=u;}
-  function exportSvg(){const a=document.createElement('a');const url=URL.createObjectURL(new Blob([erdCanvas.outerHTML],{type:'image/svg+xml'}));a.href=url;a.download='schelio-erd.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  // The canvas relies on classes defined in app.css; a serialized SVG loses that
+  // stylesheet, so exports must embed the (theme-resolved) rules inline.
+  function buildExportSvg(){
+    const cs=getComputedStyle(document.body);
+    const v=n=>cs.getPropertyValue(n).trim();
+    const clone=erdCanvas.cloneNode(true);
+    clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+    const st=document.createElementNS('http://www.w3.org/2000/svg','style');
+    st.textContent=
+      '.erd-node .card-bg{fill:'+v('--bg-card')+';stroke:'+v('--border-medium')+';stroke-width:1;rx:8;}'
+      +'.erd-node .card-title{font-family:'+v('--font-sans')+';font-size:13px;font-weight:600;fill:'+v('--text-primary')+';}'
+      +'.erd-node .card-api-name{font-family:'+v('--font-mono')+';font-size:9.5px;fill:'+v('--text-faint')+';}'
+      +'.erd-node .field-name{font-family:'+v('--font-mono')+';font-size:10.5px;fill:'+v('--text-secondary')+';}'
+      +'.erd-node .field-type{font-family:'+v('--font-mono')+';font-size:9.5px;fill:'+v('--text-faint')+';}'
+      +'.erd-node .field-icon{font-size:10px;}'
+      +'.rel-line{fill:none;stroke-width:1.5;opacity:0.6;}'
+      +'.rel-line.lookup{stroke:'+v('--accent-blue')+';}'
+      +'.rel-line.master-detail{stroke:'+v('--accent-indigo')+';}'
+      +'.rel-line.poly{stroke-dasharray:7 5;}'
+      +'.rel-label{font-family:'+v('--font-mono')+';font-size:9px;fill:'+v('--text-faint')+';}';
+    clone.insertBefore(st,clone.firstChild);
+    return new XMLSerializer().serializeToString(clone);
+  }
+  function exportPng(){
+    const bg=getComputedStyle(document.body).getPropertyValue('--bg-deep').trim()||'#060D1B';
+    const b=new Blob([buildExportSvg()],{type:'image/svg+xml'});const u=URL.createObjectURL(b);
+    const img=new Image();
+    img.onload=()=>{
+      const c=document.createElement('canvas');c.width=erdCanvas.clientWidth*2;c.height=erdCanvas.clientHeight*2;
+      const ctx=c.getContext('2d');ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.scale(2,2);ctx.drawImage(img,0,0);
+      URL.revokeObjectURL(u);
+      c.toBlob(bl=>{const a=document.createElement('a');const du=URL.createObjectURL(bl);a.href=du;a.download='schelio-erd.png';a.click();setTimeout(()=>URL.revokeObjectURL(du),1000);});
+    };
+    img.onerror=()=>{URL.revokeObjectURL(u);showToast('PNG export failed','⚠️');};
+    img.src=u;
+  }
+  function exportSvg(){const a=document.createElement('a');const url=URL.createObjectURL(new Blob([buildExportSvg()],{type:'image/svg+xml'}));a.href=url;a.download='schelio-erd.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
   // ═══ CSV EXPORT ═══
   function escCsv(s){return '"'+String(s).replace(/"/g,'""')+'"';}
@@ -1405,25 +1493,28 @@ ${objectSections}${erdSummary}
   function copyPlantUml(){navigator.clipboard.writeText($('#plantumlCode').textContent).then(()=>showToast('Copied!','📋')).catch(()=>showToast('Copy failed','⚠️'));}
 
   // ═══ VALIDATION RULES (Tooling API) ═══
+  let vrFetchFailed = {};
   async function fetchValidationRules(objectApi) {
     if(validationRuleCache[objectApi]) return validationRuleCache[objectApi];
     try {
-      const data=await sfToolingQuery(
+      const records=await sfToolingQueryAll(
         "SELECT Id, ValidationName, Active, Description, ErrorDisplayField, ErrorMessage "+
         "FROM ValidationRule WHERE EntityDefinition.QualifiedApiName = '"+escSoql(objectApi)+"' ORDER BY ValidationName"
       );
-      const records=data.records||[];
-      // Fetch formula (Metadata) for each VR via individual Tooling API call
-      for(const vr of records){
+      // Fetch formulas in parallel. No FullName fallback: FullName is just
+      // "Object.RuleName" and would poison both display and impact analysis.
+      await Promise.all(records.map(async vr=>{
         try {
-          const detail=await sfApi('/services/data/'+SF_API_VERSION+'/tooling/sobjects/ValidationRule/'+vr.Id);
-          vr.Formula=detail.Metadata?.errorConditionFormula||detail.FullName||null;
+          const detail=await sfApi('/services/data/'+SF_API_VERSION+'/tooling/sobjects/ValidationRule/'+encodeURIComponent(vr.Id));
+          vr.Formula=detail.Metadata?.errorConditionFormula||null;
         } catch(e){ vr.Formula=null; }
-      }
+      }));
       validationRuleCache[objectApi]=records;
+      vrFetchFailed[objectApi]=false;
     } catch(e) {
       console.warn('ValidationRule query failed',e);
       validationRuleCache[objectApi]=[];
+      vrFetchFailed[objectApi]=true;
     }
     return validationRuleCache[objectApi];
   }
@@ -1476,47 +1567,43 @@ ${objectSections}${erdSummary}
     }));
     try {
       // Method 1: REST API query on FlowDefinitionView by API name
-      const flowData=await sfApi(
-        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
-          "SELECT ApiName, Label, ProcessType, TriggerType, RecordTriggerType, "+
-          "TriggerObjectOrEventLabel, IsActive, Description "+
-          "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"' ORDER BY Label"
-        )
+      const flowRecords=await sfRestQueryAll(
+        "SELECT ApiName, Label, ProcessType, TriggerType, RecordTriggerType, "+
+        "TriggerObjectOrEventLabel, IsActive, Description "+
+        "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(objectApi)+"' ORDER BY Label"
       );
-      result.flows=mapFlows(flowData.records);
+      result.flows=mapFlows(flowRecords);
     } catch(e) {
       try {
         // Method 2: fallback with object label
         const meta=objectMeta[objectApi];
         const label=meta?meta.label:objectApi;
         if(label!==objectApi){
-          const flowData2=await sfApi(
-            '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
-              "SELECT ApiName, Label, ProcessType, TriggerType, RecordTriggerType, "+
-              "TriggerObjectOrEventLabel, IsActive, Description "+
-              "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(label)+"' ORDER BY Label"
-            )
+          const flowRecords2=await sfRestQueryAll(
+            "SELECT ApiName, Label, ProcessType, TriggerType, RecordTriggerType, "+
+            "TriggerObjectOrEventLabel, IsActive, Description "+
+            "FROM FlowDefinitionView WHERE TriggerObjectOrEventLabel = '"+escSoql(label)+"' ORDER BY Label"
           );
-          result.flows=mapFlows(flowData2.records);
+          result.flows=mapFlows(flowRecords2);
         }
       } catch(e2) { console.warn('Flow query failed for',objectApi,e2); }
     }
     try {
-      const trigData=await sfToolingQuery(
+      result.triggers=await sfToolingQueryAll(
         "SELECT Id, Name, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, "+
         "UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status, Body "+
         "FROM ApexTrigger WHERE TableEnumOrId = '"+escSoql(objectApi)+"'"
       );
-      result.triggers=trigData.records||[];
-    } catch(e) { console.warn('ApexTrigger query failed',e); }
+    } catch(e) {
+      console.warn('ApexTrigger query failed',e);
+      // Honesty flag: impact analysis must say "could not check", not "0 triggers"
+      result.triggersFailed=true;
+    }
     try {
-      const apData=await sfApi(
-        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
-          "SELECT Id, Name, DeveloperName, State, TableEnumOrId FROM ProcessDefinition "+
-          "WHERE TableEnumOrId = '"+escSoql(objectApi)+"' AND Type = 'Approval' ORDER BY Name"
-        )
+      result.approvals=await sfRestQueryAll(
+        "SELECT Id, Name, DeveloperName, State, TableEnumOrId FROM ProcessDefinition "+
+        "WHERE TableEnumOrId = '"+escSoql(objectApi)+"' AND Type = 'Approval' ORDER BY Name"
       );
-      result.approvals=apData.records||[];
     } catch(e) { console.warn('ProcessDefinition query failed',e); }
     automationCache[objectApi]=result;
     return result;
@@ -1542,7 +1629,8 @@ ${objectSections}${erdSummary}
     } else { h+='<div class="empty-tab-msg">No record-triggered flows found.</div>'; }
     h+='</div>';
     // Triggers
-    h+='<div class="detail-section"><div class="detail-section-title">Apex Triggers ('+data.triggers.length+')</div>';
+    h+='<div class="detail-section"><div class="detail-section-title">Apex Triggers ('+(data.triggersFailed?'?':data.triggers.length)+')</div>';
+    if(data.triggersFailed) h+='<div class="usage-note">⚠️ Trigger query failed — the list below may be incomplete.</div>';
     if(data.triggers.length){
       data.triggers.forEach(t=>{
         const events=[];
@@ -1651,18 +1739,15 @@ ${objectSections}${erdSummary}
   // ═══ PERMISSION SETS ═══
   async function fetchPermSetPermissions(objectApi) {
     if(permSetCache[objectApi]) return permSetCache[objectApi];
-    const result={objectPerms:[],fieldPerms:[],permSets:{}};
+    const result={objectPerms:[],permSets:{}};
     try {
-      const objData=await sfApi(
-        '/services/data/'+SF_API_VERSION+'/query/?q='+encodeURIComponent(
-          "SELECT Id, ParentId, Parent.Label, Parent.IsOwnedByProfile, SobjectType, "+
-          "PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, "+
-          "PermissionsViewAllRecords, PermissionsModifyAllRecords "+
-          "FROM ObjectPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
-          "AND Parent.IsOwnedByProfile = false ORDER BY Parent.Label"
-        )
+      result.objectPerms=await sfRestQueryAll(
+        "SELECT Id, ParentId, Parent.Label, Parent.IsOwnedByProfile, SobjectType, "+
+        "PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, "+
+        "PermissionsViewAllRecords, PermissionsModifyAllRecords "+
+        "FROM ObjectPermissions WHERE SobjectType = '"+escSoql(objectApi)+"' "+
+        "AND Parent.IsOwnedByProfile = false ORDER BY Parent.Label"
       );
-      result.objectPerms=objData.records||[];
     } catch(e){ console.warn('PermSet ObjectPermissions query failed',e); }
     const permSets={};
     result.objectPerms.forEach(op=>{
@@ -1710,9 +1795,22 @@ ${objectSections}${erdSummary}
   }
 
   // ═══ UNDO / REDO ═══
-  function pushUndo(){undoStack.push(JSON.stringify(nodePositions));redoStack=[];if(undoStack.length>50)undoStack.shift();}
-  function undo(){if(!undoStack.length)return;redoStack.push(JSON.stringify(nodePositions));nodePositions=JSON.parse(undoStack.pop());renderERD();}
-  function redo(){if(!redoStack.length)return;undoStack.push(JSON.stringify(nodePositions));nodePositions=JSON.parse(redoStack.pop());renderERD();}
+  // Snapshots include the selection: operations like importLayout replace both
+  // positions AND selectedObjects, and restoring only one desyncs canvas/sidebar.
+  function snapshotState(){return JSON.stringify({p:nodePositions,s:[...selectedObjects]});}
+  function restoreState(snap){
+    const st=JSON.parse(snap);
+    nodePositions=st.p||{};
+    selectedObjects=new Set(st.s||[]);
+    renderObjectList();buildRelationships();renderERD();updateEmptyState();
+  }
+  function pushUndo(){
+    const snap=snapshotState();
+    if(undoStack[undoStack.length-1]===snap) return; // skip identical (e.g. click without drag)
+    undoStack.push(snap);redoStack=[];if(undoStack.length>50)undoStack.shift();
+  }
+  function undo(){if(!undoStack.length)return;redoStack.push(snapshotState());restoreState(undoStack.pop());}
+  function redo(){if(!redoStack.length)return;undoStack.push(snapshotState());restoreState(redoStack.pop());}
 
   // ═══ CONTEXT MENU ═══
   function showContextMenu(x,y,api){
@@ -1752,7 +1850,12 @@ ${objectSections}${erdSummary}
     const inRules = rules.filter(r => (r.Formula && re.test(r.Formula)) || r.ErrorDisplayField === fieldApi);
     const inFormulas = meta.fields.filter(f => f.name !== fieldApi && f.calculatedFormula && re.test(f.calculatedFormula));
     const inTriggers = (automation.triggers || []).filter(t => t.Body && re.test(t.Body));
-    return { inRules, inFormulas, inTriggers, flowCount: (automation.flows || []).length };
+    return {
+      inRules, inFormulas, inTriggers,
+      flowCount: (automation.flows || []).length,
+      rulesFailed: vrFetchFailed[objectApi] === true,
+      triggersFailed: automation.triggersFailed === true
+    };
   }
 
   async function showFieldUsage(fieldApi) {
@@ -1762,15 +1865,22 @@ ${objectSections}${erdSummary}
     $('#fieldUsageTitle').textContent = 'Where is "' + (f ? f.label : fieldApi) + '" used?';
     $('#fieldUsageBody').innerHTML = '<div class="detail-loading"><div class="detail-spinner"></div><span>Analyzing validation rules, formulas & triggers…</span></div>';
     $('#fieldUsageModal').classList.add('visible');
-    const requested = activeDetailObject;
     try {
+      // No activeDetailObject guard: meta/fieldApi are captured, so the result is
+      // valid for the requested field even if the user switched objects meanwhile
+      // (the old guard left the modal stuck on its spinner forever).
       const u = await analyzeFieldUsage(meta, fieldApi);
-      if (activeDetailObject !== requested) return;
       const total = u.inRules.length + u.inFormulas.length + u.inTriggers.length;
-      let h = '<div class="usage-summary">' + (total ? '⚠️ Referenced in <strong>' + total + '</strong> place(s)' : '✅ No references found in validation rules, formulas or triggers') + ' — <span class="usage-api">' + escHtml(fieldApi) + '</span></div>';
+      const partial = u.rulesFailed || u.triggersFailed;
+      let summary;
+      if (partial) summary = '⚠️ <strong>Partial analysis</strong> — could not check ' + [u.rulesFailed?'validation rules':null,u.triggersFailed?'Apex triggers':null].filter(Boolean).join(' & ') + (total ? '; found <strong>'+total+'</strong> reference(s) elsewhere' : '');
+      else if (total) summary = '⚠️ Referenced in <strong>' + total + '</strong> place(s)';
+      else summary = '✅ No references found in validation rules, formulas or triggers';
+      let h = '<div class="usage-summary">' + summary + ' — <span class="usage-api">' + escHtml(fieldApi) + '</span></div>';
 
-      h += '<div class="usage-section"><div class="detail-section-title">Validation Rules (' + u.inRules.length + ')</div>';
-      if (u.inRules.length) u.inRules.forEach(r => {
+      h += '<div class="usage-section"><div class="detail-section-title">Validation Rules (' + (u.rulesFailed ? '?' : u.inRules.length) + ')</div>';
+      if (u.rulesFailed) h += '<div class="usage-note">⚠️ Could not query validation rules — do not treat this as "not used".</div>';
+      else if (u.inRules.length) u.inRules.forEach(r => {
         h += '<div class="usage-row"><span class="usage-badge vr">VR</span><span class="usage-name">' + escHtml(r.ValidationName) + '</span><span class="rt-badge ' + (r.Active ? 'active' : 'inactive') + '">' + (r.Active ? 'Active' : 'Inactive') + '</span></div>';
       });
       else h += '<div class="usage-empty">None</div>';
@@ -1783,14 +1893,16 @@ ${objectSections}${erdSummary}
       else h += '<div class="usage-empty">None</div>';
       h += '</div>';
 
-      h += '<div class="usage-section"><div class="detail-section-title">Apex Triggers (' + u.inTriggers.length + ')</div>';
-      if (u.inTriggers.length) u.inTriggers.forEach(t => {
+      h += '<div class="usage-section"><div class="detail-section-title">Apex Triggers (' + (u.triggersFailed ? '?' : u.inTriggers.length) + ')</div>';
+      if (u.triggersFailed) h += '<div class="usage-note">⚠️ Could not query trigger bodies — do not treat this as "not used".</div>';
+      else if (u.inTriggers.length) u.inTriggers.forEach(t => {
         h += '<div class="usage-row"><span class="usage-badge trg">TRG</span><span class="usage-name">' + escHtml(t.Name) + '</span><span class="rt-badge ' + (t.Status === 'Active' ? 'active' : 'inactive') + '">' + escHtml(t.Status || 'Active') + '</span></div>';
       });
       else h += '<div class="usage-empty">None</div>';
       h += '</div>';
 
       if (u.flowCount) h += '<div class="usage-note">ℹ️ ' + u.flowCount + ' record-triggered flow(s) run on this object. Field-level flow analysis is not available via the API — check them in Setup before deleting this field.</div>';
+      h += '<div class="usage-note">ℹ️ Analysis covers this object only — formulas or automation on OTHER objects referencing this field via relationships are not scanned.</div>';
 
       $('#fieldUsageBody').innerHTML = h;
     } catch (e) {
@@ -1829,14 +1941,34 @@ ${objectSections}${erdSummary}
       const raw = code.trim().replace(/^SCHELIO1\./, '');
       const L = JSON.parse(decodeURIComponent(escape(atob(raw))));
       if (!L || !Array.isArray(L.o)) throw new Error('invalid payload');
+      // The payload is untrusted: object names flow into authenticated API URLs,
+      // positions flow into SVG transforms. Validate both.
+      const names = L.o.filter(o => typeof o === 'string' && /^[A-Za-z0-9_]{1,120}$/.test(o));
+      if (!names.length) throw new Error('no valid object names');
       showToast('Importing layout…', '⏳');
       pushUndo();
-      selectedObjects = new Set(L.o);
-      nodePositions = L.p || {};
-      zoom = L.z || 1; panX = L.x || 0; panY = L.y || 0;
-      for (const o of L.o) { try { await fetchObjectDescribe(o); } catch (e) { console.warn('Describe failed for ' + o, e); } }
+      const rawPos = (L.p && typeof L.p === 'object') ? L.p : {};
+      selectedObjects = new Set();
+      nodePositions = {};
+      zoom = (typeof L.z === 'number' && isFinite(L.z)) ? L.z : 1;
+      panX = (typeof L.x === 'number' && isFinite(L.x)) ? L.x : 0;
+      panY = (typeof L.y === 'number' && isFinite(L.y)) ? L.y : 0;
+      const missing = [];
+      for (const o of names) {
+        try {
+          await fetchObjectDescribe(o);
+          selectedObjects.add(o);
+          const p = rawPos[o];
+          if (p && typeof p.x === 'number' && isFinite(p.x) && typeof p.y === 'number' && isFinite(p.y)) {
+            nodePositions[o] = { x: p.x, y: p.y };
+          } else {
+            assignPosition(o); // payload had no valid position — place on the grid
+          }
+        } catch (e) { missing.push(o); }
+      }
       renderObjectList(); buildRelationships(); renderERD(); updateEmptyState(); applyTransform();
-      showToast('Imported ' + L.o.length + ' objects', '✓');
+      if (missing.length) showToast('Imported ' + selectedObjects.size + ' of ' + names.length + ' — ' + missing.length + ' object(s) not found in this org', '⚠️');
+      else showToast('Imported ' + selectedObjects.size + ' objects', '✓');
     } catch (e) { showToast('Invalid layout code', '⚠️'); }
   }
 
@@ -1934,7 +2066,10 @@ ${objectSections}${erdSummary}
     loadTheme();
     document.addEventListener('keydown',e=>{
       const mod=e.ctrlKey||e.metaKey;
-      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');$('#fieldUsageModal').classList.remove('visible');hideContextMenu();}
+      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');$('#fieldUsageModal').classList.remove('visible');$('#canvasSearchResults').classList.remove('visible');hideContextMenu();}
+      // Don't hijack shortcuts while the user is typing in a text field
+      // (Ctrl+Z must undo their text, not the canvas)
+      if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
       if(mod&&e.key==='='){e.preventDefault();setZoom(zoom*1.2);}if(mod&&e.key==='-'){e.preventDefault();setZoom(zoom/1.2);}
       if(mod&&e.key==='0'){e.preventDefault();fitAll();}if(mod&&e.key==='s'){e.preventDefault();saveLayout();}
       if(mod&&e.key==='z'){e.preventDefault();undo();}if(mod&&e.key==='y'){e.preventDefault();redo();}

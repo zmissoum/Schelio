@@ -177,12 +177,6 @@
         <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
           <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="rgba(0,0,0,0.4)"/>
         </filter>
-        <filter id="glowBlue" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="4" result="blur"/>
-          <feFlood flood-color="#38BDF8" flood-opacity="0.3" result="color"/>
-          <feComposite in="color" in2="blur" operator="in"/>
-          <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
       </defs>
       <rect width="100%" height="100%" fill="url(#gridPattern)" class="grid-bg"/>
       <g id="erdRelationships"></g>
@@ -217,10 +211,6 @@
         <div class="detail-tab-panel" id="dtabValidations"></div>
         <div class="detail-tab-panel" id="dtabAutomation"></div>
         <div class="detail-tab-panel" id="dtabHealth"></div>
-      </div>
-      <div class="detail-loading hidden" id="detailLoading">
-        <div class="detail-spinner"></div>
-        <span>Loading metadata…</span>
       </div>
     </div>
 
