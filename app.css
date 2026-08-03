@@ -892,6 +892,32 @@ html, body {
 
 .pl-dep-tree .detail-section-title { margin-bottom: 8px; }
 
+.pl-dep-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pl-dep-tree-header .detail-section-title { margin-bottom: 0; }
+
+.pl-dep-export-btn {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent-blue);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.pl-dep-export-btn:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: var(--accent-blue);
+}
+
 .pl-dep-chain {
   display: flex;
   align-items: center;

@@ -62,7 +62,7 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 |-----|---------|
 | **Overview** | Fields, relationships, metadata with copy buttons on API names |
 | **Record Types** | Active/inactive RTs with IDs and defaults |
-| **Picklists** | Values by Record Type + **dependent picklist visualization** with interactive filtering |
+| **Picklists** | Values by Record Type + **dependent picklist visualization** with interactive filtering + **CSV export** of parent→child value mappings (incl. multi-select) |
 | **Layouts** | Page Layouts, Lightning Record Pages, RT-to-Layout mapping |
 | **Profiles** | CRUD permissions + Field-Level Security per profile |
 | **Permission Sets** | CRUD permissions per Permission Set |

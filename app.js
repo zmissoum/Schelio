@@ -601,6 +601,46 @@
     return matrix;
   }
 
+  // ═══ EXPORT PICKLIST DEPENDENCIES TO CSV ═══
+  function exportPicklistDepsCsv(meta) {
+    const deps = buildPicklistDependencies(meta);
+    const depFields = Object.keys(deps.dependent);
+    if (!depFields.length) { showToast('No dependent picklists on this object', '⚠️'); return; }
+
+    let csv = 'Object,Object API,Controlling Field,Controlling Field API,Controlling Value,Dependent Field,Dependent Field API,Dependent Value,Dependent Value API,Field Type\n';
+    let rowCount = 0;
+
+    depFields.forEach(depApi => {
+      const ctrlApi = deps.dependent[depApi];
+      const depField = meta.fields.find(f => f.name === depApi);
+      const ctrlField = meta.fields.find(f => f.name === ctrlApi);
+      const depLabel = depField ? depField.label : depApi;
+      const ctrlLabel = ctrlField ? ctrlField.label : ctrlApi;
+      const fieldType = depField ? depField.type : '';
+
+      const matrix = buildDependencyMatrix(meta, ctrlApi, depApi);
+      Object.entries(matrix).forEach(([ctrlVal, depVals]) => {
+        depVals.forEach(dv => {
+          csv += escCsv(meta.label) + ',' + escCsv(meta.name) + ',' +
+                 escCsv(ctrlLabel) + ',' + escCsv(ctrlApi) + ',' + escCsv(ctrlVal) + ',' +
+                 escCsv(depLabel) + ',' + escCsv(depApi) + ',' +
+                 escCsv(dv.label) + ',' + escCsv(dv.value) + ',' + escCsv(fieldType) + '\n';
+          rowCount++;
+        });
+      });
+    });
+
+    if (!rowCount) { showToast('No dependency mappings found', '⚠️'); return; }
+
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.href = url;
+    a.download = 'schelio-picklist-dependencies-' + meta.name + '.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Exported ' + rowCount + ' dependency mappings', '📊');
+  }
+
   function buildDepChains(deps) {
     const chains = [];
     const roots = Object.keys(deps.controlling).filter(c => !deps.dependent[c]);
@@ -635,7 +675,7 @@
 
     // ── Dependency tree (if any) ──
     if (chains.length) {
-      h += '<div class="pl-dep-tree"><div class="detail-section-title">Picklist Dependencies</div>';
+      h += '<div class="pl-dep-tree"><div class="pl-dep-tree-header"><div class="detail-section-title">Picklist Dependencies</div><button class="pl-dep-export-btn" id="plDepExportBtn" title="Export dependency mappings to CSV">📊 Export CSV</button></div>';
       chains.forEach(chain => {
         h += '<div class="pl-dep-chain">';
         chain.forEach((fieldApi, i) => {
@@ -748,6 +788,10 @@
 
     h += '</div>';
     $('#dtabPicklists').innerHTML = h;
+
+    // Export dependencies button
+    const depExportBtn = $('#plDepExportBtn');
+    if (depExportBtn) depExportBtn.addEventListener('click', () => exportPicklistDepsCsv(meta));
 
     // Accordion click handlers
     document.querySelectorAll('.pl-accordion-header').forEach(hdr => {
