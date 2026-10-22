@@ -68,6 +68,10 @@ cd schelio
 # 4. The extension icon appears in your toolbar
 ```
 
+### Tests
+
+`npm install` (jsdom, playwright, live-server — dev only) then `npm test`: a headless smoke test boots `app.html` in jsdom against `demo/fixture.js` and exercises the core ERD plus every module. `npm run videos` records the product videos in real Chromium against the same fixture. Add a case to `test/smoke.js` when you add a feature.
+
 There's **no build step** — the project is vanilla JS. Edit a file, reload the extension, and see changes immediately.
 
 ### Reloading After Changes

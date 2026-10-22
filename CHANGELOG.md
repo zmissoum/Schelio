@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-22
+
+### Added
+- **Design Mode → SFDX** (`design.js`) — draft objects and fields (15 field types incl. Lookup / Master-Detail / Picklist) on the canvas, on new or existing objects; dashed amber rendering; XML preview; export of a deployable SFDX package (`object-meta.xml`, `field-meta.xml`, `manifest/package.xml`, `sfdx-project.json`, README) through a built-in zero-dependency ZIP writer; drafts persisted per org. Nothing is written to the org
+- **Architect Score** (`lint.js`) — 15 data-model rules (field limit, picklist size, master-detail candidates, polymorphic lookups, inactive record types, duplicate labels, external-ID uniqueness, text-length defaults, help text, naming, formula density, field & object descriptions via `FieldDefinition` / Tooling `CustomObject`, orphan objects via `limits/recordCount`); 0–100 score and A–F grade on every card; **Score** detail tab; org-wide review modal with CSV export
+- **Cross-CRM Mapping Overlay** (`mapping.js`) — import a target schema JSON, target tables as orange cards, object and field mapping modal with filter, auto-map by name similarity (Dice coefficient on bigrams), mapping lines on the canvas, CSV / JSON export, export of the current org as a target schema; Dynamics 365 Sales & Service sample (`assets/targets/d365-sales.json`, 12 tables)
+- **Relationship Path Finder** (`pathfinder.js`) — BFS over all loaded relationships in both directions, shortest paths first, SOQL generation (parent chains, child subqueries, multi-step when direction changes), highlight on canvas, `Ctrl+P`
+- Module hook API on `window.Schelio` (`on`, `runHooks`, state getters, `connectorPath`, `storage`) — new features are single files that plug into `app.js`; documented in `CLAUDE.md`
+- Mapping tab in the sidebar; Path / Score / Design buttons in the toolbar; Design bar; `glowBlue` SVG filter
+- `demo/` — mocked 12-object org (record types, picklists per RT, layouts, profiles, FLS, permission sets, validation rules, flows, triggers, descriptions, record counts) and a Playwright + ffmpeg recorder producing the six product videos (`npm run videos`)
+- `test/smoke.js` — jsdom smoke test over the core and every module against the shared fixture (`npm test`, 62 assertions)
+
+### Changed
+- Card header badges are generic (Record Type count + module badges such as the grade); card title truncates to the remaining width
+- Relationship lines carry `data-pairs` so modules can address them; `fitAll` and the empty state account for draft and target cards
+- `Escape` closes every `.modal-overlay` and clears the path highlight; sidebar tabs resolve their panel by name; `[data-close-modal]` buttons close modals generically
+- Detail panel scrolls back to the top when a new object is opened
+- Light theme overrides for the module surfaces
+
+
 ## [2.1.0] - 2026-08-03
 
 ### Security

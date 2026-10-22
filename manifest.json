@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Schelio",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "A beautiful, interactive Entity Relationship Diagram viewer for Salesforce — the Schema Builder, reimagined.",
   "permissions": ["activeTab", "cookies", "storage"],
   "host_permissions": [
