@@ -49,6 +49,7 @@
     <div class="sidebar-tabs">
       <button class="sidebar-tab active" data-tab="objects">Objects</button>
       <button class="sidebar-tab" data-tab="fields">Fields</button>
+      <button class="sidebar-tab" data-tab="mapping">Mapping</button>
     </div>
 
     <!-- Object Search Panel -->
@@ -76,6 +77,29 @@
       </div>
       <div class="field-search-hint" id="fieldSearchHint">Search by field name or API name across all loaded objects</div>
       <div class="sidebar-objects" id="fieldResults"></div>
+    </div>
+
+    <!-- Mapping Panel (cross-CRM overlay) -->
+    <div class="tab-panel" id="tabMapping">
+      <div class="mapping-head">
+        <div class="mapping-status" id="mappingStatus"></div>
+        <div class="mapping-buttons">
+          <button class="layout-btn mapping-btn" id="btnMappingImport" title="Import a target schema JSON">📥 Import JSON</button>
+          <button class="layout-btn mapping-btn" id="btnMappingSample" title="Load the Dynamics 365 sample schema">D365 sample</button>
+          <button class="layout-btn mapping-btn" id="btnMappingExportSchema" title="Export the selected Salesforce objects as a target schema JSON (to map another org)">📤 Export schema</button>
+          <input type="file" id="mappingImportFile" accept=".json,application/json" style="display:none">
+        </div>
+      </div>
+      <div class="mapping-actions" id="mappingActions" style="display:none">
+        <div class="sidebar-search"><svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><input type="text" id="mappingSearch" placeholder="Search target tables…" autocomplete="off"></div>
+        <div class="mapping-buttons">
+          <button class="layout-btn mapping-btn accent" id="btnMappingAuto" title="Map canvas objects to target tables by name similarity">⚡ Auto-map</button>
+          <button class="layout-btn mapping-btn" id="btnMappingCsv">↓ CSV</button>
+          <button class="layout-btn mapping-btn" id="btnMappingJson">↓ JSON</button>
+          <button class="layout-btn mapping-btn danger" id="btnMappingClearTarget" title="Remove target schema and mappings">✕</button>
+        </div>
+      </div>
+      <div class="sidebar-objects" id="mappingTargetList"></div>
     </div>
 
     <div class="sidebar-footer">
@@ -120,6 +144,19 @@
         <button class="tool-btn" id="btnToggleRelations" title="Toggle relationships">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="4" cy="9" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="14" cy="9" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M6 9h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         </button>
+        <div class="toolbar-sep"></div>
+        <button class="tool-btn" id="btnPathFinder" title="Relationship Path Finder (Ctrl+P)">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="3" cy="14" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="15" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M5 13c4 0 4-8 8-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="2 2"/></svg>
+          <span>Path</span>
+        </button>
+        <button class="tool-btn" id="btnArchitectReview" title="Architect Score for all objects on the canvas">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2l2 4.5 5 .5-3.8 3.3L13.5 15 9 12.5 4.5 15l1.3-4.7L2 7l5-.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          <span>Score</span>
+        </button>
+        <button class="tool-btn" id="btnDesignMode" title="Design Mode — draft objects & fields, export SFDX">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 15l1-4 8-8 3 3-8 8-4 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M11 4l3 3" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span>Design</span>
+        </button>
       </div>
       <div class="toolbar-center">
         <div class="canvas-search">
@@ -162,6 +199,17 @@
       </div>
     </div>
 
+    <!-- Design Mode bar -->
+    <div class="design-bar" id="designBar">
+      <span class="design-bar-title">✎ Design Mode</span>
+      <button class="design-bar-btn primary" id="btnDesignAddObject">+ Object</button>
+      <span class="design-bar-hint">Use "+ field" on any card · double-click a draft field to edit</span>
+      <span class="design-counter" id="designCounter">0 obj · 0 fields</span>
+      <button class="design-bar-btn" id="btnPreviewSfdx">Preview XML</button>
+      <button class="design-bar-btn accent" id="btnExportSfdx" disabled>📦 Export SFDX</button>
+      <button class="design-bar-btn danger" id="btnDesignClear" title="Discard drafts">✕</button>
+    </div>
+
     <!-- SVG Canvas -->
     <svg id="erdCanvas" class="erd-canvas">
       <defs>
@@ -176,6 +224,12 @@
         </marker>
         <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
           <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="rgba(0,0,0,0.4)"/>
+        </filter>
+        <filter id="glowBlue" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feFlood flood-color="#38BDF8" flood-opacity="0.3" result="color"/>
+          <feComposite in="color" in2="blur" operator="in"/>
+          <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
       </defs>
       <rect width="100%" height="100%" fill="url(#gridPattern)" class="grid-bg"/>
@@ -201,6 +255,7 @@
         <button class="detail-tab" data-dtab="validations">Rules</button>
         <button class="detail-tab" data-dtab="automation">Automation</button>
         <button class="detail-tab" data-dtab="health">Health</button>
+        <button class="detail-tab detail-tab-score" data-dtab="score">Score</button>
       </div>
       <div class="detail-body" id="detailBody">
         <div class="detail-tab-panel active" id="dtabOverview"></div>
@@ -211,6 +266,7 @@
         <div class="detail-tab-panel" id="dtabValidations"></div>
         <div class="detail-tab-panel" id="dtabAutomation"></div>
         <div class="detail-tab-panel" id="dtabHealth"></div>
+        <div class="detail-tab-panel" id="dtabScore"></div>
       </div>
     </div>
 
@@ -302,6 +358,91 @@
     <span id="toastMsg">Saved!</span>
   </div>
 
+  <!-- ═══ Design: object modal ═══ -->
+  <div class="modal-overlay" id="designObjectModal">
+    <div class="modal modal-sm">
+      <div class="modal-header"><h3 id="dmObjTitle">New draft object</h3><button class="detail-close" data-close-modal="#designObjectModal">✕</button></div>
+      <div class="modal-body form-grid">
+        <label>Label<input type="text" id="dmObjLabel" placeholder="Invoice"></label>
+        <label>Plural label<input type="text" id="dmObjPlural" placeholder="Invoices"></label>
+        <label>API name<input type="text" id="dmObjApi" placeholder="Invoice__c"></label>
+        <label>Sharing model<select id="dmObjSharing"><option value="ReadWrite">Public Read/Write</option><option value="Read">Public Read Only</option><option value="Private">Private</option><option value="ControlledByParent">Controlled by Parent</option></select></label>
+        <label>Record name label<input type="text" id="dmObjNameLabel" placeholder="Invoice Name"></label>
+        <label>Record name type<select id="dmObjNameType"><option value="Text">Text</option><option value="AutoNumber">Auto Number</option></select></label>
+        <label class="span2">Description<textarea id="dmObjDesc" rows="2" placeholder="What this object represents and who owns it"></textarea></label>
+      </div>
+      <div class="modal-footer"><button class="modal-btn modal-btn-secondary" data-close-modal="#designObjectModal">Cancel</button><button class="modal-btn modal-btn-primary" id="dmObjSave">Save draft</button></div>
+    </div>
+  </div>
+
+  <!-- ═══ Design: field modal ═══ -->
+  <div class="modal-overlay" id="designFieldModal">
+    <div class="modal modal-sm">
+      <div class="modal-header"><h3 id="dmFieldTitle">New field</h3><button class="detail-close" data-close-modal="#designFieldModal">✕</button></div>
+      <div class="modal-body form-grid">
+        <label>Label<input type="text" id="dmFieldLabel" placeholder="Total Amount"></label>
+        <label>API name<input type="text" id="dmFieldApi" placeholder="Total_Amount__c"></label>
+        <label>Type<select id="dmFieldType"><option value="Text">Text</option><option value="LongTextArea">Long Text Area</option><option value="Number">Number</option><option value="Currency">Currency</option><option value="Percent">Percent</option><option value="Checkbox">Checkbox</option><option value="Date">Date</option><option value="DateTime">Date/Time</option><option value="Email">Email</option><option value="Phone">Phone</option><option value="Url">URL</option><option value="Picklist">Picklist</option><option value="MultiselectPicklist">Multi-Select Picklist</option><option value="Lookup">Lookup Relationship</option><option value="MasterDetail">Master-Detail Relationship</option></select></label>
+        <label id="dmRowLength">Length<input type="number" id="dmFieldLength" value="255" min="1" max="131072"></label>
+        <div id="dmRowNumber" class="form-inline"><label>Precision<input type="number" id="dmFieldPrecision" value="18" min="1" max="18"></label><label>Scale<input type="number" id="dmFieldScale" value="2" min="0" max="17"></label></div>
+        <label id="dmRowRef">Related object<select id="dmFieldRefTo"></select></label>
+        <label id="dmRowPicklist" class="span2">Picklist values (one per line)<textarea id="dmFieldPicklist" rows="4" placeholder="Draft&#10;Sent&#10;Paid"></textarea></label>
+        <div class="form-checks span2">
+          <label class="check"><input type="checkbox" id="dmFieldRequired"> Required</label>
+          <span id="dmRowUnique"><label class="check"><input type="checkbox" id="dmFieldUnique"> Unique</label><label class="check"><input type="checkbox" id="dmFieldExternalId"> External ID</label></span>
+        </div>
+        <label class="span2">Description<textarea id="dmFieldDesc" rows="2" placeholder="Business meaning — the Architect Score checks this"></textarea></label>
+        <label class="span2">Help text<input type="text" id="dmFieldHelp"></label>
+      </div>
+      <div class="modal-footer"><button class="modal-btn modal-btn-danger" id="dmFieldDelete" style="margin-right:auto">Delete</button><button class="modal-btn modal-btn-secondary" data-close-modal="#designFieldModal">Cancel</button><button class="modal-btn modal-btn-primary" id="dmFieldSave">Save field</button></div>
+    </div>
+  </div>
+
+  <!-- ═══ Design: draft field list + XML preview ═══ -->
+  <div class="modal-overlay" id="designListModal">
+    <div class="modal modal-sm"><div class="modal-header"><h3 id="designListTitle">Draft fields</h3><button class="detail-close" data-close-modal="#designListModal">✕</button></div><div class="modal-body" id="designListBody"></div></div>
+  </div>
+  <div class="modal-overlay" id="designPreviewModal">
+    <div class="modal modal-lg"><div class="modal-header"><h3>SFDX source preview</h3><button class="detail-close" data-close-modal="#designPreviewModal">✕</button></div><div class="modal-body" id="designPreviewBody"></div><div class="modal-footer"><button class="modal-btn modal-btn-secondary" data-close-modal="#designPreviewModal">Close</button></div></div>
+  </div>
+
+  <!-- ═══ Architect Score: org-wide review ═══ -->
+  <div class="modal-overlay" id="scoreReviewModal">
+    <div class="modal modal-lg"><div class="modal-header"><h3>Architect Review</h3><button class="detail-close" data-close-modal="#scoreReviewModal">✕</button></div><div class="modal-body" id="scoreReviewBody"></div><div class="modal-footer"><button class="modal-btn modal-btn-secondary" id="btnScoreReviewCsv">Export CSV</button><button class="modal-btn modal-btn-primary" data-close-modal="#scoreReviewModal">Close</button></div></div>
+  </div>
+
+  <!-- ═══ Mapping: pick source + field mapping ═══ -->
+  <div class="modal-overlay" id="mappingPickModal">
+    <div class="modal modal-xs"><div class="modal-header"><h3>Map to <span id="mappingPickTarget"></span></h3><button class="detail-close" data-close-modal="#mappingPickModal">✕</button></div>
+      <div class="modal-body form-grid"><label class="span2">Salesforce object<select id="mappingPickSource"></select></label></div>
+      <div class="modal-footer"><button class="modal-btn modal-btn-secondary" data-close-modal="#mappingPickModal">Cancel</button><button class="modal-btn modal-btn-primary" id="mappingPickGo">Map fields →</button></div></div>
+  </div>
+  <div class="modal-overlay" id="mappingModal">
+    <div class="modal modal-lg"><div class="modal-header"><h3 id="mappingModalTitle">Mapping</h3><button class="detail-close" data-close-modal="#mappingModal">✕</button></div>
+      <div class="modal-body" id="mappingModalBody"></div>
+      <div class="modal-footer"><button class="modal-btn modal-btn-danger" id="mappingUnlink" style="margin-right:auto">Unlink objects</button><button class="modal-btn modal-btn-secondary" id="mappingClearObj">Clear fields</button><button class="modal-btn modal-btn-secondary" id="mappingAutoMap">⚡ Auto-map fields</button><button class="modal-btn modal-btn-primary" data-close-modal="#mappingModal">Done</button></div></div>
+  </div>
+
+  <!-- ═══ Path Finder ═══ -->
+  <div class="modal-overlay" id="pathfinderModal">
+    <div class="modal modal-lg"><div class="modal-header"><h3>Relationship Path Finder</h3><button class="detail-close" data-close-modal="#pathfinderModal">✕</button></div>
+      <div class="modal-body">
+        <div class="pf-controls">
+          <label>From<select id="pfFrom"></select></label>
+          <button class="pf-swap" id="pfSwap" title="Swap">⇄</button>
+          <label>To<select id="pfTo"></select></label>
+          <label class="check pf-sys"><input type="checkbox" id="pfSystem"> include Owner / CreatedBy lookups</label>
+          <span class="pf-loaded" id="pfLoadedCount"></span>
+        </div>
+        <div id="pfResults"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
+  <script src="design.js"></script>
+  <script src="lint.js"></script>
+  <script src="mapping.js"></script>
+  <script src="pathfinder.js"></script>
 </body>
 </html>

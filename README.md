@@ -60,7 +60,19 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 - **Config objects** — Custom Metadata Types and Custom Settings get their own badges and sidebar filter
 - **Detail panel** — Double-click any card for full metadata (see below)
 
-### Detail Panel (8 tabs)
+### Design Mode → SFDX deploy *(v3)*
+Turn the ERD into a design tool. Draft new objects, add fields (text, number, currency, picklist, lookup, master-detail…) to new **or existing** objects directly on the canvas — drafts render dashed and amber — then export a deployable **SFDX source package** (`object-meta.xml`, `field-meta.xml`, `manifest/package.xml`, `sfdx-project.json`). Workshop in the morning, `sf project deploy start` in the afternoon. Nothing is written to the org; drafts persist per org.
+
+### Architect Score *(v3)*
+A rule engine that reviews each object the way a Data Architect would and grades it **A–F**: field count vs. platform limit, oversized picklists, required lookups that should be master-detail, duplicate labels, non-unique external IDs, inactive record types, missing descriptions (via `FieldDefinition`), orphan custom objects (zero records, zero relationships), naming conventions… The grade shows on every card; the **Score** toolbar button reviews the whole canvas and exports findings to CSV.
+
+### Cross-CRM Mapping Overlay *(v3)*
+Load a **target schema** (JSON) — a Dynamics 365 Sales & Service sample ships in `assets/targets/` — and its tables appear on the canvas as orange cards. Map Salesforce objects to target tables and fields to fields, with **auto-mapping by name similarity**, then export the mapping as **CSV or JSON** for a migration spec. Export your own org as a target schema to map org-to-org.
+
+### Relationship Path Finder *(v3)*
+*"How do I get from Case to Product2?"* — breadth-first search over every loaded relationship (parent and child directions), shortest paths first, with the **SOQL that walks the path** (dot-notation chains, child subqueries, or chained steps when the direction changes). Highlight a path on the canvas. `Ctrl+P`.
+
+### Detail Panel (9 tabs)
 
 | Tab | Content |
 |-----|---------|
@@ -73,6 +85,7 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 | **Rules** | Validation Rules with **formulas**, error messages, and status |
 | **Automation** | Record-triggered Flows, Apex Triggers with events, and Approval Processes |
 | **Health** | Schema health score (/100), limit bars, and warnings |
+| **Score** | Architect Score: grade, findings by severity, rules applied, CSV export |
 
 ### Cross-Object Field Search
 - Search by field label, API name, or type across **all loaded objects**
@@ -95,6 +108,10 @@ Salesforce's built-in Schema Builder is slow, cluttered, and hasn't changed in y
 | **CSV** | Field inventory spreadsheet across all selected objects |
 | **Deps CSV** | Dependent picklist mappings (parent→child values) across all selected objects |
 | **PDF Spec** | Complete technical data model spec document (see below) |
+| **SFDX package** | Deployable source for everything drafted in Design Mode |
+| **Mapping CSV/JSON** | Object + field mapping toward a target system |
+| **Schema JSON** | Selected objects as a target schema for another org |
+| **Score CSV** | Architect findings, per object or org-wide |
 
 ### PDF Technical Specification
 
@@ -171,6 +188,7 @@ If auto-detection doesn't work (e.g. enhanced security, SSO):
 | `Ctrl` + `0` | Fit all objects in view |
 | `Ctrl` + `S` | Save current layout |
 | `Ctrl` + `F` | Open field search |
+| `Ctrl` + `P` | Relationship Path Finder |
 | `Ctrl` + `Z` | Undo |
 | `Ctrl` + `Y` | Redo |
 | `Escape` | Close panels/modals |
@@ -191,9 +209,15 @@ schelio/
 ├── popup.html / popup.js  # Extension popup (connection UI)
 ├── app.html               # Main ERD viewer (opens in new tab)
 ├── app.css                # Dark blueprint theme
-├── app.js                 # Core application (ERD engine, API, exports)
+├── app.js                 # Core application (ERD engine, API, exports) + module hook API
+├── design.js              # Design Mode → SFDX source generator (zero-dependency ZIP writer)
+├── lint.js                # Architect Score rule engine
+├── mapping.js             # Cross-CRM mapping overlay (target schema JSON, auto-map, CSV/JSON)
+├── pathfinder.js          # Relationship Path Finder (BFS + SOQL generation)
+├── demo/                  # Mocked org + Playwright/ffmpeg recorder for product videos
+├── test/                  # Headless smoke test (jsdom)
 ├── icons/                 # Extension icons (16, 48, 128px)
-├── assets/                # Screenshots and banner for README
+├── assets/                # Banner, logos, sample target schemas (assets/targets/)
 ├── .github/               # Issue templates, PR template
 ├── CONTRIBUTING.md
 ├── CHANGELOG.md

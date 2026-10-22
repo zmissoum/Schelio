@@ -1,8 +1,12 @@
 /* ============================================================
-   Schelio — Main Application v2.0.0
-   Features: ERD, Field Search, Mermaid, Save/Load, PDF Spec,
-             Record Types, Picklist Values by RT, Layouts,
-             Lightning Record Pages
+   Schelio — Main Application v3.0.0
+   Core: ERD, Field Search, Mermaid/PlantUML, Save/Load/Share,
+         PDF Spec, Record Types, Picklists by RT, Layouts,
+         Profiles & Permission Sets, Validation Rules, Automation,
+         Health, Impact analysis, Undo/Redo, Themes.
+   Modules (separate files, plugged in via window.Schelio hooks):
+         design.js (Design Mode → SFDX), lint.js (Architect Score),
+         mapping.js (cross-CRM mapping), pathfinder.js (Path Finder)
    ============================================================ */
 (function () {
   'use strict';
@@ -68,6 +72,8 @@
     try {
       setLoadingProgress(10,'Connecting…'); await testConnection();
       setLoadingProgress(30,'Fetching objects…'); await fetchObjectList();
+      document.dispatchEvent(new CustomEvent('schelio:objects-ready'));
+      updateEmptyState();
       setLoadingProgress(90,'Ready!');
       setTimeout(() => { loadingOverlay.classList.add('hidden'); }, 400);
     } catch(err) { showLoadingError('Connection failed: '+err.message); }
@@ -330,7 +336,7 @@
     renderObjectList();buildRelationships();renderERD();updateEmptyState();
   }
   function assignPosition(api){const c=Object.keys(nodePositions).length;const cols=Math.ceil(Math.sqrt(c+1));nodePositions[api]={x:60+(c%cols)*(CARD_WIDTH+80),y:60+Math.floor(c/cols)*350};}
-  function updateEmptyState(){emptyState.classList.toggle('hidden',selectedObjects.size>0);}
+  function updateEmptyState(){emptyState.classList.toggle('hidden',Object.keys(nodePositions).length>0);}
 
   // ═══ FIELD SEARCH ═══
   function searchFields(query) {
@@ -411,6 +417,7 @@
     activeDetailObject = apiName;
     detailTitle.textContent = meta.label;
     detailPanel.classList.add('visible');
+    detailBody.scrollTop = 0;
 
     // Reset tabs to Overview
     document.querySelectorAll('.detail-tab').forEach(t=>t.classList.remove('active'));
@@ -478,6 +485,10 @@
     }).catch(e => {
       if (activeDetailObject === apiName) $('#dtabAutomation').innerHTML = '<div class="empty-tab-msg">Could not load automation.<br>'+escHtml(e.message)+'</div>';
     });
+
+    // Module-provided tabs (Architect Score, …) — modules must check
+    // Schelio.activeDetailObject === apiName before rendering async results
+    runHooks('detailTabs', apiName, meta);
   }
 
   function renderOverviewTab(meta) {
@@ -1224,33 +1235,49 @@ ${objectSections}${erdSummary}
     selectedObjects.forEach(api=>{
       const meta=objectMeta[api];if(!meta)return;const pos=nodePositions[api];if(!pos)return;
       const isCustom=meta.custom,color=isCustom?COLORS.custom:COLORS.standard;
-      const fields=meta.fields.filter(f=>!f.deprecatedAndHidden).sort((a,b)=>{if(a.name==='Id')return-1;if(b.name==='Id')return 1;if(a.type==='reference'&&b.type!=='reference')return-1;if(a.type!=='reference'&&b.type==='reference')return 1;return a.label.localeCompare(b.label);}).slice(0,MAX_FIELDS_SHOWN);
-      const cardH=CARD_HEADER_H+fields.length*FIELD_ROW_H+CARD_PADDING*2+(meta.fields.length>MAX_FIELDS_SHOWN?20:0);
+      // Draft fields from modules (Design Mode) are appended to the real ones
+      const extra=runHooks('extraFields',api).flat().map(f=>Object.assign({},f,{_draft:true}));
+      const allFields=meta.fields.filter(f=>!f.deprecatedAndHidden).concat(extra);
+      const fields=allFields.sort((a,b)=>{if(a.name==='Id')return-1;if(b.name==='Id')return 1;if(a._draft&&!b._draft)return-1;if(!a._draft&&b._draft)return 1;if(a.type==='reference'&&b.type!=='reference')return-1;if(a.type!=='reference'&&b.type==='reference')return 1;return a.label.localeCompare(b.label);}).slice(0,MAX_FIELDS_SHOWN);
+      const cardH=CARD_HEADER_H+fields.length*FIELD_ROW_H+CARD_PADDING*2+(allFields.length>MAX_FIELDS_SHOWN?20:0);
       const g=svgEl('g',{class:'erd-node','data-api':api,transform:'translate('+pos.x+','+pos.y+')'});
       g.appendChild(svgEl('rect',{class:'card-bg',width:CARD_WIDTH,height:cardH,filter:'url(#cardShadow)'}));
       g.appendChild(svgEl('rect',{class:'card-header-bg',width:CARD_WIDTH,height:CARD_HEADER_H,fill:color.header,'clip-path':'inset(0 0 0 0 round 8px 8px 0 0)'}));
       g.appendChild(svgEl('rect',{x:0,y:CARD_HEADER_H-2,width:CARD_WIDTH,height:2,fill:color.accent,opacity:0.6}));
-      // RT count badge on card
+      // Header badges: RT count + whatever modules contribute (Architect grade, …)
+      let badgeX=CARD_WIDTH-8;
+      const badges=[];
       const rtCount = (meta.recordTypeInfos||[]).filter(r=>!r.master&&r.active).length;
-      if (rtCount > 0) {
-        g.appendChild(svgEl('rect',{x:CARD_WIDTH-40,y:6,width:32,height:16,rx:4,fill:'rgba(255,255,255,0.15)'}));
-        const rtLabel=svgEl('text',{x:CARD_WIDTH-24,y:18,'text-anchor':'middle','font-size':'9','font-family':"'JetBrains Mono',monospace",fill:'rgba(255,255,255,0.7)'});
-        rtLabel.textContent=rtCount+' RT';g.appendChild(rtLabel);
-      }
-      let t=svgEl('text',{class:'card-title',x:14,y:22});t.textContent=truncate(meta.label,rtCount>0?22:26);g.appendChild(t);
+      if (rtCount > 0) badges.push({text:rtCount+' RT',fill:'rgba(255,255,255,0.15)',color:'rgba(255,255,255,0.7)'});
+      runHooks('cardBadges',api).flat().forEach(b=>{if(b&&b.text)badges.push(b);});
+      badges.forEach(b=>{
+        const w=Math.max(28,b.text.length*7+10);badgeX-=w;
+        const bg=svgEl('g',{class:'card-badge'});
+        if(b.title){const tt=svgEl('title');tt.textContent=b.title;bg.appendChild(tt);}
+        bg.appendChild(svgEl('rect',{x:badgeX,y:6,width:w,height:16,rx:4,fill:b.fill||'rgba(255,255,255,0.15)'}));
+        const bl=svgEl('text',{x:badgeX+w/2,y:18,'text-anchor':'middle','font-size':'9','font-weight':'600','font-family':"'JetBrains Mono',monospace",fill:b.color||'rgba(255,255,255,0.7)'});
+        bl.textContent=b.text;bg.appendChild(bl);g.appendChild(bg);
+        badgeX-=4;
+      });
+      const titleMax=Math.max(10,Math.floor((badgeX-14)/8));
+      let t=svgEl('text',{class:'card-title',x:14,y:22});t.textContent=truncate(meta.label,titleMax);g.appendChild(t);
       t=svgEl('text',{class:'card-api-name',x:14,y:38});t.textContent=meta.name;g.appendChild(t);
       fields.forEach((field,i)=>{
         const fy=CARD_HEADER_H+CARD_PADDING+i*FIELD_ROW_H;
-        g.appendChild(svgEl('rect',{x:2,y:fy,width:CARD_WIDTH-4,height:FIELD_ROW_H,fill:'transparent',rx:3}));
-        let el=svgEl('text',{class:'field-icon',x:12,y:fy+15});el.textContent=FIELD_ICONS[field.type]||FIELD_ICONS.default;g.appendChild(el);
-        el=svgEl('text',{class:'field-name',x:28,y:fy+15});el.textContent=truncate(field.label,20);g.appendChild(el);
+        g.appendChild(svgEl('rect',{x:2,y:fy,width:CARD_WIDTH-4,height:FIELD_ROW_H,fill:field._draft?'rgba(251,191,36,0.07)':'transparent',rx:3}));
+        let el=svgEl('text',{class:'field-icon',x:12,y:fy+15});el.textContent=field._draft?'✎':(FIELD_ICONS[field.type]||FIELD_ICONS.default);g.appendChild(el);
+        el=svgEl('text',{class:'field-name'+(field._draft?' field-draft':''),x:28,y:fy+15});el.textContent=truncate(field.label,20);g.appendChild(el);
         el=svgEl('text',{class:'field-type',x:CARD_WIDTH-12,y:fy+15,'text-anchor':'end'});el.textContent=field.type;g.appendChild(el);
       });
-      if(meta.fields.length>MAX_FIELDS_SHOWN){const my=CARD_HEADER_H+CARD_PADDING+fields.length*FIELD_ROW_H+6;const el=svgEl('text',{x:CARD_WIDTH/2,y:my+8,'text-anchor':'middle','font-size':'10',fill:'#64748B','font-family':"'JetBrains Mono',monospace"});el.textContent='+ '+(meta.fields.length-MAX_FIELDS_SHOWN)+' more';g.appendChild(el);}
+      if(allFields.length>MAX_FIELDS_SHOWN){const my=CARD_HEADER_H+CARD_PADDING+fields.length*FIELD_ROW_H+6;const el=svgEl('text',{x:CARD_WIDTH/2,y:my+8,'text-anchor':'middle','font-size':'10',fill:'#64748B','font-family':"'JetBrains Mono',monospace"});el.textContent='+ '+(allFields.length-MAX_FIELDS_SHOWN)+' more';g.appendChild(el);}
       // Tooltip
       const tip=svgEl('title',{});tip.textContent=meta.label+' — Double-click for details, right-click for menu';g.appendChild(tip);
-      g.dataset.height=cardH;g.style.cursor='pointer';g.addEventListener('mousedown',onNodeMouseDown);g.addEventListener('dblclick',()=>showDetail(api));erdNodes.appendChild(g);
+      g.dataset.height=cardH;g.style.cursor='pointer';g.addEventListener('mousedown',onNodeMouseDown);g.addEventListener('dblclick',()=>showDetail(api));
+      runHooks('decorateNode',api,g,meta);
+      erdNodes.appendChild(g);
     });
+    // Modules render their own nodes (draft objects, mapping targets…)
+    runHooks('renderExtraNodes');
   }
 
   function renderRelationships2(){
@@ -1291,12 +1318,28 @@ ${objectSections}${erdSummary}
       // Visible line — dashed when every relation in the group is polymorphic
       const allPoly=group.rels.every(r=>r.poly);
       const lineWidth=Math.min(1.5+count*0.5,4);
-      erdRels.appendChild(svgEl('path',{class:'rel-line '+(hasMD?'master-detail':'lookup')+(allPoly?' poly':''),d:pathD,'stroke-width':lineWidth,'marker-end':hasMD?'url(#arrowMD)':'url(#arrowLookup)'}));
+      erdRels.appendChild(svgEl('path',{class:'rel-line '+(hasMD?'master-detail':'lookup')+(allPoly?' poly':''),d:pathD,'stroke-width':lineWidth,'marker-end':hasMD?'url(#arrowMD)':'url(#arrowLookup)','data-pairs':group.rels.map(r=>r.from+'>'+r.to+'>'+r.field).join('|')}));
 
       // Label
       const labelText=count>1?count+' relations':group.rels[0].field;
       const l=svgEl('text',{class:'rel-label',x:mx,y:my-8,'text-anchor':'middle'});l.textContent=labelText;erdRels.appendChild(l);
     });
+    runHooks('renderExtraRelationships');
+  }
+
+  // Reusable connector geometry so modules draw lines consistent with core ones.
+  // Returns {d, mx, my} for a curve between two node keys present in nodePositions.
+  function connectorPath(fromKey,toKey){
+    const fp=nodePositions[fromKey],tp=nodePositions[toKey];if(!fp||!tp)return null;
+    const fn=erdNodes.querySelector('[data-api="'+fromKey+'"]'),tn=erdNodes.querySelector('[data-api="'+toKey+'"]');
+    const fH=fn?parseInt(fn.dataset.height)||200:200,tH=tn?parseInt(tn.dataset.height)||200:200;
+    const fcx=fp.x+CARD_WIDTH/2,fcy=fp.y+fH/2,tcx=tp.x+CARD_WIDTH/2,tcy=tp.y+tH/2;
+    let x1,y1,x2,y2;const dx=tcx-fcx,dy=tcy-fcy;
+    if(Math.abs(dx)>Math.abs(dy)){if(dx>0){x1=fp.x+CARD_WIDTH;y1=fcy;x2=tp.x;y2=tcy;}else{x1=fp.x;y1=fcy;x2=tp.x+CARD_WIDTH;y2=tcy;}}
+    else{if(dy>0){x1=fcx;y1=fp.y+fH;x2=tcx;y2=tp.y;}else{x1=fcx;y1=fp.y;x2=tcx;y2=tp.y+tH;}}
+    const mx=(x1+x2)/2,my=(y1+y2)/2;let cx1,cy1,cx2,cy2;
+    if(Math.abs(dx)>Math.abs(dy)){cx1=mx;cy1=y1;cx2=mx;cy2=y2;}else{cx1=x1;cy1=my;cx2=x2;cy2=my;}
+    return {d:'M '+x1+' '+y1+' C '+cx1+' '+cy1+', '+cx2+' '+cy2+', '+x2+' '+y2,mx,my};
   }
 
   // ═══ RELATIONSHIP TOOLTIP ═══
@@ -1404,7 +1447,9 @@ ${objectSections}${erdSummary}
 
     fitAll();renderERD();
   }
-  function fitAll(){if(!selectedObjects.size)return;let mx=Infinity,my=Infinity,Mx=-Infinity,My=-Infinity;selectedObjects.forEach(a=>{const p=nodePositions[a];if(!p)return;mx=Math.min(mx,p.x);my=Math.min(my,p.y);Mx=Math.max(Mx,p.x+CARD_WIDTH);My=Math.max(My,p.y+300);});const r=erdCanvas.getBoundingClientRect();const cw=Mx-mx+100,ch=My-my+100;zoom=Math.max(0.2,Math.min(r.width/cw,r.height/ch,1.5));panX=(r.width-cw*zoom)/2-mx*zoom+50;panY=(r.height-ch*zoom)/2-my*zoom+50;applyTransform();}
+  function fitAll(){const keys=Object.keys(nodePositions);if(!keys.length)return;let mx=Infinity,my=Infinity,Mx=-Infinity,My=-Infinity;keys.forEach(a=>{const p=nodePositions[a];if(!p)return;const n=erdNodes.querySelector('[data-api="'+a+'"]');const h=n?parseInt(n.dataset.height)||300:300;mx=Math.min(mx,p.x);my=Math.min(my,p.y);Mx=Math.max(Mx,p.x+CARD_WIDTH);My=Math.max(My,p.y+h);});const r=erdCanvas.getBoundingClientRect();const cw=Mx-mx+100,ch=My-my+100;zoom=Math.max(0.2,Math.min(r.width/cw,r.height/ch,1.5));panX=(r.width-cw*zoom)/2-mx*zoom+50;panY=(r.height-ch*zoom)/2-my*zoom+50;applyTransform();}
+  // Next free slot on the canvas (used by modules when placing a new card)
+  function nextFreePosition(){const n=Object.keys(nodePositions).length;const cols=Math.ceil(Math.sqrt(n+1));return {x:60+(n%cols)*(CARD_WIDTH+80),y:60+Math.floor(n/cols)*350};}
 
   // The canvas relies on classes defined in app.css; a serialized SVG loses that
   // stylesheet, so exports must embed the (theme-resolved) rules inline.
@@ -1989,7 +2034,7 @@ ${objectSections}${erdSummary}
     fieldSearchInput.addEventListener('input',()=>searchFields(fieldSearchInput.value));
 
     // Sidebar tabs
-    document.querySelectorAll('.sidebar-tab').forEach(tab=>{tab.addEventListener('click',()=>{document.querySelectorAll('.sidebar-tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));tab.classList.add('active');$(tab.dataset.tab==='objects'?'#tabObjects':'#tabFields').classList.add('active');});});
+    document.querySelectorAll('.sidebar-tab').forEach(tab=>{tab.addEventListener('click',()=>{document.querySelectorAll('.sidebar-tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));tab.classList.add('active');const id='#tab'+tab.dataset.tab.charAt(0).toUpperCase()+tab.dataset.tab.slice(1);const panel=$(id);if(panel)panel.classList.add('active');runHooks('sidebarTab',tab.dataset.tab);});});
 
     // Detail panel tabs
     document.querySelectorAll('.detail-tab').forEach(tab=>{tab.addEventListener('click',()=>{document.querySelectorAll('.detail-tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.detail-tab-panel').forEach(p=>p.classList.remove('active'));tab.classList.add('active');$('#dtab'+tab.dataset.dtab.charAt(0).toUpperCase()+tab.dataset.dtab.slice(1)).classList.add('active');});});
@@ -2035,6 +2080,8 @@ ${objectSections}${erdSummary}
     $('#plantumlModalCancel').addEventListener('click',()=>$('#plantumlModal').classList.remove('visible'));
     $('#plantumlCopy').addEventListener('click',copyPlantUml);
     $('#detailClose').addEventListener('click',()=>detailPanel.classList.remove('visible'));
+    // Generic close buttons for module modals: <button data-close-modal="#someModal">
+    document.querySelectorAll('[data-close-modal]').forEach(b=>b.addEventListener('click',()=>{const m=$(b.dataset.closeModal);if(m)m.classList.remove('visible');}));
     $('#btnThemeToggle').addEventListener('click',toggleTheme);
     $('#btnToggleRelations').classList.add('active');
     // Detail panel resize
@@ -2066,7 +2113,7 @@ ${objectSections}${erdSummary}
     loadTheme();
     document.addEventListener('keydown',e=>{
       const mod=e.ctrlKey||e.metaKey;
-      if(e.key==='Escape'){detailPanel.classList.remove('visible');$('#mermaidModal').classList.remove('visible');$('#plantumlModal').classList.remove('visible');$('#fieldUsageModal').classList.remove('visible');$('#canvasSearchResults').classList.remove('visible');hideContextMenu();}
+      if(e.key==='Escape'){detailPanel.classList.remove('visible');document.querySelectorAll('.modal-overlay.visible').forEach(m=>m.classList.remove('visible'));$('#canvasSearchResults').classList.remove('visible');hideContextMenu();runHooks('escape');}
       // Don't hijack shortcuts while the user is typing in a text field
       // (Ctrl+Z must undo their text, not the canvas)
       if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
@@ -2077,5 +2124,53 @@ ${objectSections}${erdSummary}
     });
   }
 
+  // ═══ MODULE API ═══
+  // Modules (design.js, lint.js, mapping.js, pathfinder.js) plug in through this
+  // namespace. Hooks are called by name; every registered callback's return value
+  // is collected into an array (see runHooks). Modules must follow CLAUDE.md:
+  // escHtml() on every org string, escSoql() in SOQL, paginated queries, no token.
+  const hooks = {};
+  function runHooks(name, ...args){
+    const list = hooks[name]; if (!list || !list.length) return [];
+    const out = [];
+    list.forEach(fn => { try { const r = fn(...args); if (r !== undefined) out.push(r); } catch (e) { console.error('[Schelio hook '+name+']', e); } });
+    return out;
+  }
+
+  window.Schelio = {
+    // constants
+    CARD_WIDTH, CARD_HEADER_H, FIELD_ROW_H, MAX_FIELDS_SHOWN, CARD_PADDING, FIELD_ICONS, SF_API_VERSION,
+    // state (live getters — never cache these in a module)
+    get instanceUrl(){ return instanceUrl; },
+    get orgKey(){ return instanceUrl.replace(/[^a-zA-Z0-9]/g,'_'); },
+    get allObjects(){ return allObjects; },
+    get objectMeta(){ return objectMeta; },
+    get selectedObjects(){ return selectedObjects; },
+    get nodePositions(){ return nodePositions; },
+    get relationships(){ return relationships; },
+    get zoom(){ return zoom; }, get panX(){ return panX; }, get panY(){ return panY; },
+    get picklistCache(){ return picklistCache; },
+    get activeDetailObject(){ return activeDetailObject; },
+    // DOM
+    erdCanvas, erdNodes, erdRels, detailPanel,
+    // Salesforce (always paginated for queries, escSoql for parameters)
+    sfApi, sfToolingQuery, sfToolingQueryAll, sfRestQueryAll, escSoql, fetchObjectDescribe, toggleObject,
+    // rendering & UI
+    renderERD, renderObjectList, buildRelationships, updateEmptyState, applyTransform, fitAll, showDetail, pushUndo,
+    connectorPath, nextFreePosition, onNodeMouseDown, svgEl, truncate, showToast, escHtml, escCsv, downloadCsv,
+    // hooks
+    on(name, fn){ (hooks[name] = hooks[name] || []).push(fn); },
+    runHooks,
+    // small helpers shared by modules
+    download(name, content, mime){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([content],{type:mime||'application/octet-stream'})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); },
+    openModal(id){ const m=$(id); if(m) m.classList.add('visible'); },
+    closeModal(id){ const m=$(id); if(m) m.classList.remove('visible'); },
+    storage: {
+      get(key, fallback){ try { const v = localStorage.getItem('schelio_'+key+'_'+instanceUrl.replace(/[^a-zA-Z0-9]/g,'_')); return v ? JSON.parse(v) : fallback; } catch(e){ return fallback; } },
+      set(key, value){ try { localStorage.setItem('schelio_'+key+'_'+instanceUrl.replace(/[^a-zA-Z0-9]/g,'_'), JSON.stringify(value)); return true; } catch(e){ return false; } }
+    }
+  };
+
   init();
+  document.dispatchEvent(new CustomEvent('schelio:ready'));
 })();

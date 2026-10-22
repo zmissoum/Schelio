@@ -1,13 +1,18 @@
 {
   "name": "schelio",
-  "version": "2.0.0",
-  "description": "A beautiful, interactive Entity Relationship Diagram viewer for Salesforce",
+  "version": "3.0.0",
+  "description": "Schelio \u2014 the Salesforce Schema Builder, reimagined. Chrome extension (Manifest V3, vanilla JS, zero runtime dependencies).",
   "private": true,
   "scripts": {
     "dev": "live-server --port=3000 --open=app.html",
-    "start": "live-server --port=3000 --open=app.html"
+    "start": "live-server --port=3000 --open=app.html",
+    "check": "node --check app.js && node --check design.js && node --check lint.js && node --check mapping.js && node --check pathfinder.js && node --check demo/fixture.js",
+    "test": "npm run check && node test/smoke.js",
+    "videos": "node demo/record.js demo/out"
   },
   "devDependencies": {
-    "live-server": "^1.2.2"
+    "jsdom": "^24.0.0",
+    "live-server": "^1.2.2",
+    "playwright": "^1.56.0"
   }
 }
